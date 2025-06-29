@@ -18,19 +18,13 @@ use Riven\Amqp\Annotation\Callee;
 use Riven\Amqp\Annotation\Consumer;
 use Riven\Amqp\Annotation\Impl;
 use Riven\Amqp\Annotation\Producer;
+use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Invoke\CalleeCollector;
 use Riven\Amqp\Message\ConsumerMessage;
 use Riven\Amqp\Message\ProducerMessage;
 
 class AmqpProvider extends ServiceProvider
 {
-    // 接口实现注解的常量名 「laravel_database_laravel_cache_impl」
-    const string IMPL = 'impl';
-    // 回调方法注解的常量名 「laravel_database_laravel_cache_callee」
-    const string CALLEE = 'callee';
-    // AMQP消费者注解的常量名 「laravel_database_laravel_cache_amqp」
-    const string AMQP = 'amqp';
-
     /**
      * 启动服务提供者
      * 在这个方法中注册各种通过注解发现的服务、回调和AMQP消费者。
@@ -55,7 +49,7 @@ class AmqpProvider extends ServiceProvider
     protected function registerImplClasses(): void
     {
         // 从缓存或通过扫描发现 Impl 绑定
-        $bindings = $this->getBindings(self::IMPL, [$this, 'discoverImplBindings']);
+        $bindings = $this->getBindings(AmqpRedisKey::Impl->value, [$this, 'discoverImplBindings']);
         foreach ($bindings as $interface => $class) {
             // 将接口与其实现类绑定为单例，如果尚未绑定的话
             $this->app->singletonIf($interface, $class);
@@ -71,7 +65,7 @@ class AmqpProvider extends ServiceProvider
     protected function registerCalleeMethods(): void
     {
         // 从缓存或通过扫描发现 Callee 方法
-        $calleeMethods = $this->getBindings(self::CALLEE, [$this, 'discoverCalleeMethods']);
+        $calleeMethods = $this->getBindings(AmqpRedisKey::Callee->value, [$this, 'discoverCalleeMethods']);
         foreach ($calleeMethods as $callable) {
             // 将发现的回调方法添加到回调收集器中
             CalleeCollector::addCallee(...$callable);
@@ -88,7 +82,7 @@ class AmqpProvider extends ServiceProvider
     protected function registerAmqp(): void
     {
         // 从缓存或通过扫描发现 AMQP 绑定
-        $bindings = $this->getBindings(self::AMQP, [$this, 'discoverAmqp']);
+        $bindings = $this->getBindings(AmqpRedisKey::Amqp->value, [$this, 'discoverAmqp']);
         $this->app->singleton(AmqpManager::class, function () use ($bindings) {
             $amqpManager = new AmqpManager($bindings['producers'], $bindings['consumers']);
             register_shutdown_function([$amqpManager, 'shutdown']);

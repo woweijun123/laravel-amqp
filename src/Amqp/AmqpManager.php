@@ -4,7 +4,7 @@ namespace Riven\Amqp;
 
 use Riven\Amqp\Builder\ExchangeBuilder;
 use Riven\Amqp\Builder\QueueBuilder;
-use Riven\Amqp\Enum\RedisKey;
+use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Exception\ChannelException;
 use Riven\Amqp\Exception\MessageException;
 use Riven\Amqp\Message\ConsumerMessageInterface;
@@ -134,7 +134,7 @@ class AmqpManager
         }
 
         // Redis 缓存
-        $cached   = Redis::hGet(RedisKey::AmqpDeclaredExchange->value, $builder->getExchange());
+        $cached   = Redis::hGet(AmqpRedisKey::AmqpDeclaredExchange->value, $builder->getExchange());
         if ($cached !== null) {
             return $this->declaredExchanges[$builder->getExchange()] = (bool)$cached;
         }
@@ -153,12 +153,12 @@ class AmqpManager
                 $builder->getArguments(), // 其他可选参数
                 $builder->getTicket()     // 队列的访问权限凭证
             );
-            Redis::hSet(RedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 1);
-            Redis::expire(RedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 1);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
             return $this->declaredExchanges[$builder->getExchange()] = true;
         } catch (Throwable $e) {
-            Redis::hSet(RedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 1);
-            Redis::expire(RedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 1);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
 
             return $this->declaredExchanges[$builder->getExchange()] = false;
         }
@@ -190,16 +190,16 @@ class AmqpManager
                 $builder->getTicket()       // 队列的访问权限凭证
             );
             // redis 缓存
-            Redis::hSet(RedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 1);
-            Redis::expire(RedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 1);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
             $this->declaredExchanges[$builder->getExchange()] = true;
 
             return true;
         } catch (Throwable $exception) {
             Log::error("[{$message->getExchange()}] 交换机申明失败" . $exception->getMessage());
             // redis 缓存
-            Redis::hSet(RedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 0);
-            Redis::expire(RedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredExchange->value, $builder->getExchange(), 0);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
             $this->declaredExchanges[$builder->getExchange()] = false;
             throw $exception;
         }
@@ -216,7 +216,7 @@ class AmqpManager
         }
 
         // Redis 缓存
-        $cached   = Redis::hGet(RedisKey::AmqpDeclaredQueue->value, $builder->getQueue());
+        $cached   = Redis::hGet(AmqpRedisKey::AmqpDeclaredQueue->value, $builder->getQueue());
         if ($cached !== null) {
             return $this->declaredQueues[$builder->getQueue()] = (bool)$cached;
         }
@@ -234,12 +234,12 @@ class AmqpManager
                 $builder->getArguments(), // 其他可选参数（如 TTL, DLX 等）
                 $builder->getTicket()     // 访问权限票据
             );
-            Redis::hSet(RedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 1);
-            Redis::expire(RedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 1);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
             return $this->declaredQueues[$builder->getQueue()] = true;
         } catch (Throwable $e) {
-            Redis::hSet(RedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 0);
-            Redis::expire(RedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 0);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
 
             return $this->declaredQueues[$builder->getQueue()] = false;
         }
@@ -270,8 +270,8 @@ class AmqpManager
                 $builder->getTicket() // 访问权限票据
             );
             // redis 缓存
-            Redis::hSet(RedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 1);
-            Redis::expire(RedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 1);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
             $this->declaredQueues[$builder->getQueue()] = true;
 
             $routineKeys = (array)$message->getRoutingKey();
@@ -296,8 +296,8 @@ class AmqpManager
             return true;
         } catch (Throwable $exception) {
             Log::error("[{$builder->getQueue()}] 队列申明失败" . $exception->getMessage());
-            Redis::hSet(RedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 0);
-            Redis::expire(RedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
+            Redis::hSet(AmqpRedisKey::AmqpDeclaredQueue->value, $builder->getQueue(), 0);
+            Redis::expire(AmqpRedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
             $this->declaredQueues[$builder->getQueue()] = false;
             throw $exception;
         }
@@ -667,14 +667,14 @@ class AmqpManager
         if (preg_match("/no exchange '([^']+?)'/", $exception->getMessage(), $matches)) {
             $exchangeName = $matches[1];
             if (key_exists($exchangeName, $this->producers)) {
-                Redis::hSet(RedisKey::AmqpDeclaredExchange->value, $exchangeName, 0);
+                Redis::hSet(AmqpRedisKey::AmqpDeclaredExchange->value, $exchangeName, 0);
             }
         }
         // 根据异常信息判定指定队列不存在，则标记redis中对应的队列不存在
         if (preg_match("/no queue '([^']+?)'/", $exception->getMessage(), $matches)) {
             $queueName = $matches[1];
             if (key_exists($queueName, $this->consumers)) {
-                Redis::hSet(RedisKey::AmqpDeclaredQueue->value, $queueName, 0);
+                Redis::hSet(AmqpRedisKey::AmqpDeclaredQueue->value, $queueName, 0);
             }
         }
     }
