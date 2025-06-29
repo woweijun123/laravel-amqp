@@ -23,7 +23,8 @@
         "laravel/framework": "^12.0",
         "php-amqplib/php-amqplib": "^3.7",
         "predis/predis": "^2.0",
-        "ext-redis": "*"
+        "ext-redis": "*",
+        "ext-pcntl": "*"
     },
     "require-dev": {
         "phpunit/phpunit": "*",
