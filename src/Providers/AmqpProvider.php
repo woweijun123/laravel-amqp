@@ -9,21 +9,26 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionClass;
 use Riven\Amqp\AmqpManager;
 use Riven\Amqp\Annotation\Callee;
 use Riven\Amqp\Annotation\Consumer;
+use Riven\Amqp\Annotation\Impl;
 use Riven\Amqp\Annotation\Producer;
+use Riven\Amqp\Invoke\CalleeCollector;
 use Riven\Amqp\Message\ConsumerMessage;
 use Riven\Amqp\Message\ProducerMessage;
 
 class AmqpProvider extends ServiceProvider
 {
-    // 回调方法注解的常量名 「xxx_database_laravel_cache_callee」
+    // 接口实现注解的常量名 「laravel_database_laravel_cache_impl」
+    const string IMPL = 'impl';
+    // 回调方法注解的常量名 「laravel_database_laravel_cache_callee」
     const string CALLEE = 'callee';
-    // AMQP消费者注解的常量名 「xxx_database_laravel_cache_amqp」
+    // AMQP消费者注解的常量名 「laravel_database_laravel_cache_amqp」
     const string AMQP = 'amqp';
 
     /**
@@ -33,10 +38,28 @@ class AmqpProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // 注册通过 @Impl 注解发现的接口实现类
+        $this->registerImplClasses();
         // 注册通过 @Callee 注解发现的回调方法
         $this->registerCalleeMethods();
         // 注册通过 @Consumer 注解发现的AMQP消费者
         $this->registerAmqp();
+    }
+
+    /**
+     * 注册通过 `@Impl` 注解标记的接口实现类。
+     * 它会扫描指定目录下的PHP文件，查找带有 `App\Annotation\Impl` 注解的类，
+     * 并将其实现的接口与类本身绑定到 Laravel 的服务容器中（单例）。
+     * @throws Exception
+     */
+    protected function registerImplClasses(): void
+    {
+        // 从缓存或通过扫描发现 Impl 绑定
+        $bindings = $this->getBindings(self::IMPL, [$this, 'discoverImplBindings']);
+        foreach ($bindings as $interface => $class) {
+            // 将接口与其实现类绑定为单例，如果尚未绑定的话
+            $this->app->singletonIf($interface, $class);
+        }
     }
 
     /**
@@ -71,6 +94,43 @@ class AmqpProvider extends ServiceProvider
             register_shutdown_function([$amqpManager, 'shutdown']);
             return $amqpManager;
         });
+    }
+
+    /**
+     * 发现带有 `@Impl` 注解的类，并返回接口到实现类的绑定数组。
+     * 扫描 'app/Services' 和 'app/Repositories' 目录下的PHP文件。
+     * @return array
+     */
+    private function discoverImplBindings(): array
+    {
+        // 扫描指定目录下的PHP文件
+        $files    = $this->scanPhpFiles([app_path('Services'), app_path('Repositories')]);
+        $bindings = [];
+
+        foreach ($files as $file) {
+            try {
+                // 根据文件路径获取完整的类名
+                $className = $this->getClassFromFilePath($file);
+                // 如果类不存在则跳过
+                if (!class_exists($className)) {
+                    continue;
+                }
+
+                $reflection = new ReflectionClass($className);
+                // 检查类是否包含 Impl 注解
+                if ($reflection->getAttributes(Impl::class)) {
+                    // 如果包含，则获取该类实现的所有接口，并将接口名作为键，类名作为值存入绑定数组
+                    foreach ($reflection->getInterfaceNames() as $interfaceName) {
+                        $bindings[$interfaceName] = $className;
+                    }
+                }
+            } catch (Exception $e) {
+                // 记录警告日志，跳过处理失败的文件
+                Log::warning("跳过文件: $file", ['exception' => $e]);
+            }
+        }
+
+        return $bindings;
     }
 
     /**
@@ -275,14 +335,14 @@ class AmqpProvider extends ServiceProvider
      * 假设文件在 `app_path()` 目录下，并遵循PSR-4命名规范。
      * @param string $file PHP文件的绝对路径
      * @return string 完整的类名
-     * @throws \InvalidArgumentException 如果文件不在 app 目录下
+     * @throws InvalidArgumentException 如果文件不在 app 目录下
      */
     protected function getClassFromFilePath(string $file): string
     {
         $appPath = app_path();
         // 检查文件是否在 app 目录下
         if (!str_starts_with($file, $appPath)) {
-            throw new \InvalidArgumentException("文件 [$file] 不在 app 目录下，无法解析类名。");
+            throw new InvalidArgumentException("文件 [$file] 不在 app 目录下，无法解析类名。");
         }
 
         // 获取相对于 app 目录的相对路径
