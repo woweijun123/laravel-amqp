@@ -1,0 +1,48 @@
+{
+    "name": "riven/laravel-amqp",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "php",
+        "laravel",
+        "amqp"
+    ],
+    "description": "Laravel amqp",
+    "autoload": {
+        "psr-4": {
+            "Riven\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Test\\": "tests"
+        }
+    },
+    "require": {
+        "php": ">=8.3",
+        "laravel/framework": "^12.0",
+        "php-amqplib/php-amqplib": "^3.7",
+        "predis/predis": "^2.0",
+        "ext-redis": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "*",
+        "friendsofphp/php-cs-fixer": "^3.0",
+        "phpstan/phpstan": "^1.0"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "co-phpunit --prepend test/bootstrap.php -c phpunit.xml --colors=always",
+        "analyze": "phpstan analyse --memory-limit 300M -l 0 ./src",
+        "cs-fix": "php-cs-fixer fix $1"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Riven\\Providers\\AmqpProvider"
+            ]
+        }
+    }
+}
