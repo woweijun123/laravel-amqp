@@ -3,8 +3,9 @@
 namespace Riven\Amqp;
 
 use App\Enums\RedisKey;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
-use Log;
+use Riven\Amqp\Enum\AmqpRedisKey;
 use Throwable;
 
 class AmqpRetry
@@ -68,6 +69,6 @@ class AmqpRetry
      */
     protected function getKey(string $messageId): string
     {
-        return RedisKey::AmqpRetryCount()->spr($messageId);
+        return AmqpRedisKey::AmqpRetryCount->spr($messageId);
     }
 }
