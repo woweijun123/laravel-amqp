@@ -25,6 +25,11 @@ use Riven\Amqp\Message\ProducerMessage;
 
 class AmqpProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        $this->mergeConfigFrom(__DIR__ . '/../config/amqp.php', 'amqp');
+    }
+
     /**
      * 启动服务提供者
      * 在这个方法中注册各种通过注解发现的服务、回调和AMQP消费者。
@@ -35,7 +40,6 @@ class AmqpProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../config/amqp.php' => config_path('amqp.php'),
         ]);
-
         // 注册通过 @Impl 注解发现的接口实现类
         $this->registerImplClasses();
         // 注册通过 @Callee 注解发现的回调方法
