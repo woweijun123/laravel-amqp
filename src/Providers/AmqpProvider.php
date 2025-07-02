@@ -32,6 +32,10 @@ class AmqpProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->publishes([
+            __DIR__.'/../config/amqp.php' => config_path('amqp.php'),
+        ]);
+
         // 注册通过 @Impl 注解发现的接口实现类
         $this->registerImplClasses();
         // 注册通过 @Callee 注解发现的回调方法
