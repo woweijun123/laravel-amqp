@@ -247,7 +247,7 @@ class AmqpProvider extends ServiceProvider
         $bindings = $discoverCallback();
 
         // 将发现的绑定结果永久存入缓存
-        $this->getCache()->forever($type, $bindings);
+//        $this->getCache()->forever($type, $bindings);
         return $bindings;
     }
 
