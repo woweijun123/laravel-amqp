@@ -392,7 +392,7 @@ class AmqpManager
             throw new InvalidArgumentException("未找到消费者: $queueName");
         }
         /* @var ConsumerMessageInterface $consumer */
-        $consumer = $this->consumers[$queueName];
+        $consumer = app($this->consumers[$queueName]);
         // 构建唯一的消费者标签，用于标识当前消费者
         $consumerTag = "consumer_{$queueName}_" . uniqid();
         try {
