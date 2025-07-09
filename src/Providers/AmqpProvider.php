@@ -352,6 +352,6 @@ class AmqpProvider extends ServiceProvider
      */
     protected static function getType(AmqpRedisKey $key): string
     {
-        return $key->spr(Env::get('APP_NAME', 'laravel-amqp' . mt_rand(1, 1000)));
+        return $key->spr(Env::get('APP_NAME', 'laravel-amqp'));
     }
 }
