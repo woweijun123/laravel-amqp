@@ -162,7 +162,7 @@ class AmqpProvider extends ServiceProvider
                         // 实例化注解对象
                         $callee = $attribute->newInstance();
                         // 收集回调信息：[类名, 方法名], 事件名, 作用域
-                        $bindings[] = [[$className, $method->getName()], $callee->event, $callee->scope];
+                        $bindings[] = [[$className, $method->getName()], serialize($callee->event), $callee->scope];
                     }
                 }
             } catch (Exception $e) {
