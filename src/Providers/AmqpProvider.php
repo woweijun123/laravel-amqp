@@ -5,7 +5,6 @@ namespace Riven\Providers;
 use Exception;
 use FilesystemIterator;
 use Illuminate\Contracts\Cache\Repository;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Env;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -13,7 +12,6 @@ use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
-use ReflectionClass;
 use Riven\Amqp\AmqpManager;
 use Riven\Amqp\Annotation\Callee;
 use Riven\Amqp\Annotation\Consumer;
@@ -21,8 +19,7 @@ use Riven\Amqp\Annotation\Impl;
 use Riven\Amqp\Annotation\Producer;
 use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Invoke\CalleeCollector;
-use Riven\Amqp\Message\ConsumerMessage;
-use Riven\Amqp\Message\ProducerMessage;
+use Riven\Amqp\Invoke\Reflection;
 use Throwable;
 
 class AmqpProvider extends ServiceProvider
@@ -41,9 +38,7 @@ class AmqpProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->publishes([
-            __DIR__.'/../config/amqp.php' => config_path('amqp.php'),
-        ]);
+        $this->publishes([__DIR__.'/../config/amqp.php' => config_path('amqp.php')]);
         // 注册通过 @Impl 注解发现的接口实现类
         $this->registerImplClasses();
         // 注册通过 @Callee 注解发现的回调方法
@@ -79,8 +74,9 @@ class AmqpProvider extends ServiceProvider
         // 从缓存或通过扫描发现 Callee 方法
         $calleeMethods = $this->getBindings(self::getType(AmqpRedisKey::Callee), [$this, 'discoverCalleeMethods']);
         foreach ($calleeMethods as $callable) {
+            [$callable, $event, $scope] = $callable;
             // 将发现的回调方法添加到回调收集器中
-            CalleeCollector::addCallee(...$callable);
+            CalleeCollector::addCallee($callable, is_string($event) ? unserialize($event) : $event, $scope);
         }
     }
 
@@ -122,7 +118,7 @@ class AmqpProvider extends ServiceProvider
                     continue;
                 }
 
-                $reflection = new ReflectionClass($className);
+                $reflection = Reflection::reflectClass($className);
                 // 检查类是否包含 Impl 注解
                 if ($reflection->getAttributes(Impl::class)) {
                     // 如果包含，则获取该类实现的所有接口，并将接口名作为键，类名作为值存入绑定数组
@@ -148,7 +144,7 @@ class AmqpProvider extends ServiceProvider
     {
         // 扫描指定目录下的PHP文件
         $files         = $this->scanPhpFiles([app_path('Services'), app_path('Amqp')]);
-        $calleeMethods = [];
+        $bindings = [];
 
         foreach ($files as $file) {
             try {
@@ -158,8 +154,7 @@ class AmqpProvider extends ServiceProvider
                 if (!class_exists($className)) {
                     continue;
                 }
-
-                $reflection = new ReflectionClass($className);
+                $reflection = Reflection::reflectClass($className);
                 // 遍历类的所有方法
                 foreach ($reflection->getMethods() as $method) {
                     // 遍历方法上所有 Callee 注解
@@ -167,7 +162,7 @@ class AmqpProvider extends ServiceProvider
                         // 实例化注解对象
                         $callee = $attribute->newInstance();
                         // 收集回调信息：[类名, 方法名], 事件名, 作用域
-                        $calleeMethods[] = [[$className, $method->getName()], $callee->event, $callee->scope];
+                        $bindings[] = [[$className, $method->getName()], $callee->event, $callee->scope];
                     }
                 }
             } catch (Exception $e) {
@@ -176,7 +171,7 @@ class AmqpProvider extends ServiceProvider
             }
         }
 
-        return $calleeMethods;
+        return $bindings;
     }
 
     /**
@@ -188,7 +183,7 @@ class AmqpProvider extends ServiceProvider
     {
         // 扫描指定目录下的PHP文件
         $files    = $this->scanPhpFiles([app_path('Amqp')]);
-        $bindings = [];
+        $bindings = ['producers' => [], 'consumers' => []];
 
         foreach ($files as $file) {
             try {
@@ -198,20 +193,14 @@ class AmqpProvider extends ServiceProvider
                 if (!class_exists($className)) {
                     continue;
                 }
-                $reflection = new ReflectionClass($className);
+                $reflection = Reflection::reflectClass($className);
                 // 检查类是否包含 Producer 注解
                 if ($reflection->getAttributes(Producer::class)) {
-                    /* @var ProducerMessage $producer */
-                    $producer = app()->make($className);
-                    // 通过 Laravel 容器实例化生产者类
-                    Arr::set($bindings, "producers.{$producer->getExchange()}", $producer);
+                    $bindings['producers'][app($className)->getExchange()] = $className;
                 }
                 // 检查类是否包含 Consumer 注解
                 if ($reflection->getAttributes(Consumer::class)) {
-                    /* @var ConsumerMessage $consumer */
-                    $consumer = app()->make($className);
-                    // 通过 Laravel 容器实例化消费者类
-                    Arr::set($bindings, "consumers.{$consumer->getQueue()}", $consumer);
+                    $bindings['consumers'][app($className)->getQueue()] = $className;
                 }
             } catch (Exception $e) {
                 // 记录警告日志，跳过处理失败的文件

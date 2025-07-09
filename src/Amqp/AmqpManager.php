@@ -104,6 +104,7 @@ class AmqpManager
 
         /* @var ProducerMessageInterface $producer */
         foreach ($this->producers as $producer) {
+            $producer = app($producer);
             if (empty($producer->getExchange())) {
                 Log::warning("[{$producer->getExchange()}]的交换机配置缺少必需的字段。");
                 continue;
@@ -114,6 +115,7 @@ class AmqpManager
         /* @var ConsumerMessageInterface $consumer */
         // 遍历所有队列配置，初始化交换机和消费者实例
         foreach ($this->consumers as $consumer) {
+            $consumer = app($consumer);
             if (empty($consumer->getQueue())) {
                 Log::warning("[{$consumer->getQueue()}]的队列配置缺少必需的字段");
                 continue;
