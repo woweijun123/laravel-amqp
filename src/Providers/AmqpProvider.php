@@ -232,7 +232,7 @@ class AmqpProvider extends ServiceProvider
     private function getBindings(string $type, callable $discoverCallback): array
     {
         // 如果不是本地环境，尝试从缓存读取
-         if (!Env::get('local')) {
+         if (!app()->environment('local')) {
              try {
                  /** @var Repository $cache */
                  $cached = $this->getCache()->get($type);
