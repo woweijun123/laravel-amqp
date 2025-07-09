@@ -15,7 +15,7 @@ trait SprintfVal
             return $this->value;
         }
         // 处理带 * 的情况：替换 * 为 参数
-        $value = (string)$this->value;
+        $value = $this->value;
         if (str_contains($value, '*')) {
             $i     = 0;
             $value = preg_replace_callback('/\*/', function () use (&$i, &$args) {

@@ -6,6 +6,7 @@ use Exception;
 use FilesystemIterator;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Env;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
@@ -22,9 +23,12 @@ use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Invoke\CalleeCollector;
 use Riven\Amqp\Message\ConsumerMessage;
 use Riven\Amqp\Message\ProducerMessage;
+use Throwable;
 
 class AmqpProvider extends ServiceProvider
 {
+    private int $cacheTime = 86400; // 缓存时间「秒」
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/amqp.php', 'amqp');
@@ -57,7 +61,7 @@ class AmqpProvider extends ServiceProvider
     protected function registerImplClasses(): void
     {
         // 从缓存或通过扫描发现 Impl 绑定
-        $bindings = $this->getBindings(AmqpRedisKey::Impl->value, [$this, 'discoverImplBindings']);
+        $bindings = $this->getBindings(self::getType(AmqpRedisKey::Impl), [$this, 'discoverImplBindings']);
         foreach ($bindings as $interface => $class) {
             // 将接口与其实现类绑定为单例，如果尚未绑定的话
             $this->app->singletonIf($interface, $class);
@@ -73,7 +77,7 @@ class AmqpProvider extends ServiceProvider
     protected function registerCalleeMethods(): void
     {
         // 从缓存或通过扫描发现 Callee 方法
-        $calleeMethods = $this->getBindings(AmqpRedisKey::Callee->value, [$this, 'discoverCalleeMethods']);
+        $calleeMethods = $this->getBindings(self::getType(AmqpRedisKey::Callee), [$this, 'discoverCalleeMethods']);
         foreach ($calleeMethods as $callable) {
             // 将发现的回调方法添加到回调收集器中
             CalleeCollector::addCallee(...$callable);
@@ -90,7 +94,7 @@ class AmqpProvider extends ServiceProvider
     protected function registerAmqp(): void
     {
         // 从缓存或通过扫描发现 AMQP 绑定
-        $bindings = $this->getBindings(AmqpRedisKey::Amqp->value, [$this, 'discoverAmqp']);
+        $bindings = $this->getBindings(self::getType(AmqpRedisKey::Amqp), [$this, 'discoverAmqp']);
         $this->app->singleton(AmqpManager::class, function () use ($bindings) {
             $amqpManager = new AmqpManager($bindings['producers'], $bindings['consumers']);
             register_shutdown_function([$amqpManager, 'shutdown']);
@@ -221,40 +225,37 @@ class AmqpProvider extends ServiceProvider
     /**
      * 获取绑定配置，优先从缓存读取，如果缓存不存在或环境非 'local' 则通过回调函数发现，
      * 并将结果存入缓存。
-     * @param string   $type             绑定类型（如 'impl', 'callee', 'amqp'）
+     * @param string $type 绑定类型（如 'impl', 'callee', 'amqp'）
      * @param callable $discoverCallback 发现绑定的回调函数
      * @return array
-     * @throws Exception
      */
     private function getBindings(string $type, callable $discoverCallback): array
     {
         // 如果不是本地环境，尝试从缓存读取
-        // if (!app()->environment('local')) {
-        //     try {
-        //         /** @var Repository $cache */
-        //         $cached = $this->getCache()->get($type);
-        //
-        //         // 如果缓存中存在且是数组，则直接返回
-        //         if (is_array($cached) && !empty($cached)) {
-        //             return $cached;
-        //         }
-        //     } catch (InvalidArgumentException $e) {
-        //         // 缓存读取失败，记录警告并降级为本地扫描
-        //         Log::warning("缓存读取失败，降级为本地扫描: key=$type", ['exception' => $e]);
-        //     }
-        // }
+         if (!Env::get('local')) {
+             try {
+                 /** @var Repository $cache */
+                 $cached = $this->getCache()->get($type);
+                 // 如果缓存中存在且是数组，则直接返回
+                 if (is_array($cached) && !empty($cached)) {
+                     return $cached;
+                 }
+             } catch (Throwable $e) {
+                 // 缓存读取失败，记录警告并降级为本地扫描
+                 Log::warning("缓存读取失败，降级为本地扫描: key=$type", ['exception' => $e]);
+             }
+         }
         // 如果缓存不存在或读取失败，则通过回调函数发现绑定
         $bindings = $discoverCallback();
 
         // 将发现的绑定结果永久存入缓存
-//        $this->getCache()->forever($type, $bindings);
+        $this->getCache()->put($type, $bindings, $this->cacheTime);
         return $bindings;
     }
 
     /**
      * 获取缓存仓库实例，优先使用 Redis，如果 Redis 不可用则降级到文件缓存。
      * @return Repository
-     * @throws Exception 如果文件缓存也无法使用
      */
     private function getCache(): Repository
     {
@@ -270,7 +271,6 @@ class AmqpProvider extends ServiceProvider
             } catch (Exception $eFile) {
                 // 文件缓存也不可用，记录错误并抛出异常
                 Log::error('文件缓存也不可用，请检查配置', ['exception' => $eFile]);
-                throw $eFile;
             }
         }
     }
@@ -354,5 +354,15 @@ class AmqpProvider extends ServiceProvider
 
         // 拼接成完整的命名空间类名（假设 app 目录对应 App 命名空间）
         return "App\\$className";
+    }
+
+    /**
+     * 获取缓存键
+     * @param AmqpRedisKey $key
+     * @return string
+     */
+    protected static function getType(AmqpRedisKey $key): string
+    {
+        return $key->spr(Env::get('APP_NAME', 'laravel-amqp'));
     }
 }

@@ -13,9 +13,9 @@ enum AmqpRedisKey: string
     case AmqpDeclaredQueue = 'amqp:queue';
 
     // 接口实现注解的常量名
-    case Impl = 'impl';
+    case Impl = 'amqp:impl:%s';
     // 回调方法注解的常量名
-    case Callee = 'callee';
+    case Callee = 'amqp:callee:%s';
     // AMQP消费者注解的常量名
-    case Amqp = 'amqp';
+    case Amqp = 'amqp:amqp:%s';
 }
