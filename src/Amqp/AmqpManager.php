@@ -27,6 +27,7 @@ class AmqpManager
     private int $cacheTime = 3600; // 缓存时间「秒」
     private array $declaredExchanges = []; // 交换机缓存
     private array $declaredQueues = []; // 队列缓存
+    private ?string $currentConnectionType = null; // 当前连接类型
 
     /**
      * @param array $producers 生产者实例数组，键为交换机名，值为 ProducerMessageInterface 实例
@@ -46,29 +47,41 @@ class AmqpManager
      */
     private function connect(string $type = ''): void
     {
-        if (!isset($this->connection) || !$this->connection->isConnected() || $type == 'consumer') {
-            // 从配置文件中获取AMQP连接配置
-            $config = config('amqp');
-            if ($type == 'consumer') {
-                $config = array_merge($config, config('amqp.consumer'));
+        if (isset($this->connection) && $this->connection->isConnected()) {
+            // 如果当前连接类型与请求类型一致，则直接返回现有连接
+            if ($this->currentConnectionType === $type) {
+                return;
             }
-            $this->connection = new AMQPStreamConnection(
-                $config['host'], // RabbitMQ 服务器地址
-                $config['port'], // RabbitMQ 端口，默认为 5672
-                $config['user'], // 连接用户名
-                $config['password'], // 连接密码
-                $config['vhost'], // 虚拟主机（Virtual Host），默认为 '/'
-                false, // 是否开启 insist 模式。如果为 true，客户端会在连接失败时尝试重连（通常不推荐在构造函数直接设置）
-                'AMQPLAIN', // 认证机制，默认为 'AMQPLAIN'
-                null, // 客户端属性数组，可用于发送自定义连接属性给 Broker
-                'en_US', // Locale，语言/地区设置
-                $config['connection_timeout'], // TCP 连接超时时间（秒）
-                $config['read_write_timeout'], // 读写操作超时时间（秒）
-                null, // 回调函数，用于处理连接异常（不常用）
-                $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
-                $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
-            );
+            // 如果类型不同但连接仍处于打开状态，先关闭再重建
+            if ($this->channel->is_open()) {
+                $this->channel->close();
+            }
+            $this->connection->close();
         }
+        // 从配置文件中获取AMQP连接配置
+        $config = config('amqp');
+        if ($type == 'consumer') {
+            $config = array_merge($config, config('amqp.consumer'));
+        }
+        // 建立新连接
+        $this->connection = new AMQPStreamConnection(
+            $config['host'], // RabbitMQ 服务器地址
+            $config['port'], // RabbitMQ 端口，默认为 5672
+            $config['user'], // 连接用户名
+            $config['password'], // 连接密码
+            $config['vhost'], // 虚拟主机（Virtual Host），默认为 '/'
+            false, // 是否开启 insist 模式。如果为 true，客户端会在连接失败时尝试重连（通常不推荐在构造函数直接设置）
+            'AMQPLAIN', // 认证机制，默认为 'AMQPLAIN'
+            null, // 客户端属性数组，可用于发送自定义连接属性给 Broker
+            'en_US', // Locale，语言/地区设置
+            $config['connection_timeout'], // TCP 连接超时时间（秒）
+            $config['read_write_timeout'], // 读写操作超时时间（秒）
+            null, // 回调函数，用于处理连接异常（不常用）
+            $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
+            $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
+        );
+        // 记录当前连接类型
+        $this->currentConnectionType = $type;
     }
 
     /**
