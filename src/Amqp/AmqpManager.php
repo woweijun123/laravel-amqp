@@ -47,26 +47,26 @@ class AmqpManager
      */
     private function connect(string $type = ''): void
     {
-        if (!isset($this->connection) || !$this->connection->isConnected()) {
+        if (!isset($this->connection) || !$this->connection->isConnected() || $type == 'consumer') {
             // 从配置文件中获取AMQP连接配置
             $config = config('amqp');
             if ($type == 'consumer') {
                 $config = array_merge($config, config('amqp.consumer'));
             }
             $this->connection = new AMQPStreamConnection(
-                $config['host'],               // RabbitMQ 服务器地址
-                $config['port'],               // RabbitMQ 端口，默认为 5672
-                $config['user'],               // 连接用户名
-                $config['password'],           // 连接密码
-                $config['vhost'],              // 虚拟主机（Virtual Host），默认为 '/'
-                false,                         // 是否开启 insist 模式。如果为 true，客户端会在连接失败时尝试重连（通常不推荐在构造函数直接设置）
-                'AMQPLAIN',                    // 认证机制，默认为 'AMQPLAIN'
-                null,                          // 客户端属性数组，可用于发送自定义连接属性给 Broker
-                'en_US',                       // Locale，语言/地区设置
+                $config['host'], // RabbitMQ 服务器地址
+                $config['port'], // RabbitMQ 端口，默认为 5672
+                $config['user'], // 连接用户名
+                $config['password'], // 连接密码
+                $config['vhost'], // 虚拟主机（Virtual Host），默认为 '/'
+                false, // 是否开启 insist 模式。如果为 true，客户端会在连接失败时尝试重连（通常不推荐在构造函数直接设置）
+                'AMQPLAIN', // 认证机制，默认为 'AMQPLAIN'
+                null, // 客户端属性数组，可用于发送自定义连接属性给 Broker
+                'en_US', // Locale，语言/地区设置
                 $config['connection_timeout'], // TCP 连接超时时间（秒）
                 $config['read_write_timeout'], // 读写操作超时时间（秒）
-                null,                          // 回调函数，用于处理连接异常（不常用）
-                $config['keepalive'],          // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
+                null, // 回调函数，用于处理连接异常（不常用）
+                $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
                 $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
             );
         }
