@@ -11,7 +11,6 @@ use Riven\Amqp\Message\ConsumerMessageInterface;
 use Riven\Amqp\Message\MessageInterface;
 use Riven\Amqp\Message\ProducerMessageInterface;
 use Riven\Amqp\Message\Type;
-use Exception;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use InvalidArgumentException;
@@ -43,7 +42,7 @@ class AmqpManager
     /**
      * @param string $type
      * @return void
-     * @throws Exception
+     * @throws Throwable
      */
     private function connect(string $type = ''): void
     {
@@ -383,7 +382,7 @@ class AmqpManager
      * 监听指定队列并消费消息
      * @param string $queueName
      * @return void
-     * @throws Exception
+     * @throws Throwable
      */
     public function consume(string $queueName): void
     {
@@ -412,7 +411,7 @@ class AmqpManager
                     $this->getCallback($consumer, $message)();
                 }
             );
-        } catch (Exception $exception) {
+        } catch (Throwable $exception) {
             $this->switchExchangeQueueCache($exception);
             throw $exception;
         }
@@ -646,10 +645,10 @@ class AmqpManager
 
     /**
      * 缓存交换机和队列不存在
-     * @param Throwable|Exception $exception
+     * @param Throwable $exception
      * @return void
      */
-    protected function switchExchangeQueueCache(Throwable|Exception $exception): void
+    protected function switchExchangeQueueCache(Throwable $exception): void
     {
         // 根据异常信息判定指定交换机不存在，则标记redis中对应的交换机不存在
         if (preg_match("/no exchange '([^']+?)'/", $exception->getMessage(), $matches)) {
