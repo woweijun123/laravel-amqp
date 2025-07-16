@@ -52,11 +52,7 @@ class AmqpManager
             if ($this->currentConnectionType === $type) {
                 return;
             }
-            // 如果类型不同但连接仍处于打开状态，先关闭再重建
-            if ($this->channel->is_open()) {
-                $this->channel->close();
-            }
-            $this->connection->close();
+            $this->shutdown();
         }
         // 从配置文件中获取AMQP连接配置
         $config = config('amqp');
