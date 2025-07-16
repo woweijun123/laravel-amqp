@@ -386,28 +386,28 @@ class AmqpManager
     public function consume(string $queueName): void
     {
         // 检查队列对应的消费者是否存在
-        if (!isset($this->consumers[$queueName])) {
+        if (empty($this->consumers[$queueName])) {
             throw new InvalidArgumentException("未找到消费者: $queueName");
         }
-        /* @var ConsumerMessageInterface $consumer */
-        $consumer = app($this->consumers[$queueName]);
-        // 构建唯一的消费者标签，用于标识当前消费者
-        $consumerTag = "consumer_{$queueName}_" . uniqid();
         try {
+            /* @var ConsumerMessageInterface $consumer */
+            $consumer = app($this->consumers[$queueName]);
+            // 构建唯一的消费者标签，用于标识当前消费者
+            $consumerTag = "consumer_{$queueName}_" . uniqid();
             // 连接
             $this->connect('consumer');
             $this->channel->basic_qos(0, $this->prefetchCount, false); // global=false 表示作用于当前消费者
             // 注册基本消费者回调
             $this->channel->basic_consume(
-                $queueName,   // 要消费的队列名称
+                $queueName, // 要消费的队列名称
                 $consumerTag, // 消费者标签
-                false,        // no_local: 不接收发布者自己发布的消息（通常设置为 false）
-                false,        // no_ack: 启用手动消息确认（false 表示需要手动 ack/nack）
-                false,        // exclusive: 非排他性消费（允许多个消费者共享队列）
-                false,        // nowait: 阻塞等待服务器响应
+                false, // no_local: 不接收发布者自己发布的消息（通常设置为 false）
+                false, // no_ack: 启用手动消息确认（false 表示需要手动 ack/nack）
+                false, // exclusive: 非排他性消费（允许多个消费者共享队列）
+                false, // nowait: 阻塞等待服务器响应
                 function (AMQPMessage $message) use ($consumer) {
                     // 包装消费者回调函数，以处理消息确认/拒绝逻辑
-                    $this->getCallback($consumer, $message)();
+                    $this->handleCallback($consumer, $message);
                 }
             );
             // 启动消费者监听循环, 持续等待消息，直到通道不再处于消费状态
@@ -417,97 +417,93 @@ class AmqpManager
         } catch (Throwable $exception) {
             $this->switchExchangeQueueCache($exception);
             $this->shutdown();
-            throw $exception;
+            Log::error('消费者异常退出进程' . $exception->getMessage());
+            exit(0); // 异常退出进程, 退出码 0，可用于supervisor重启
         }
     }
 
     /**
-     * 获取消费者回调函数，处理消息的业务逻辑、重试机制和确认/拒绝。
+     * 处理消费者回调函数
      * @param ConsumerMessageInterface $consumerMessage 消费者消息处理器实例
-     * @param AMQPMessage              $message         收到的 AMQP 消息
-     * @return callable 实际的消息处理回调函数
+     * @param AMQPMessage $message 收到的 AMQP 消息
+     * @return void
      */
-    protected function getCallback(ConsumerMessageInterface $consumerMessage, AMQPMessage $message): callable
+    protected function handleCallback(ConsumerMessageInterface $consumerMessage, AMQPMessage $message)
     {
-        return function () use ($consumerMessage, $message) {
-            $channel     = $message->getChannel();
-            $deliveryTag = $message->getDeliveryTag(); // 消息的投递标签，用于确认/拒绝
-            $messageId   = $message->get('message_id'); // 获取消息 ID，用于追踪重试次数
+        $channel     = $message->getChannel();
+        $deliveryTag = $message->getDeliveryTag(); // 消息的投递标签，用于确认/拒绝
+        $messageId   = $message->get('message_id'); // 获取消息 ID，用于追踪重试次数
 
-            // 如果消息没有 message_id，无法追踪重试次数，直接拒绝（不重新入队）
-            if (empty($messageId)) {
-                Log::warning("消息没有message_id，无法跟踪重试计数", [
-                    'delivery_tag' => $deliveryTag,
-                    'body'         => $message->getBody(),
-                    'queue'        => $consumerMessage->getQueue(),
-                ]);
-                $channel->basic_reject($deliveryTag, false); // false 表示不重新入队，通常会进入死信队列（如果配置了）
-                return;
-            }
-            try {
-                // 执行消费逻辑
-                $data   = $consumerMessage->unserialize($message->getBody()); // 反序列化消息体
-                Log::withContext(['message_id' => $messageId]);
-                Log::debug(
-                    "------- {$consumerMessage->getQueue()} start -------",
-                    ['delivery_tag' => $deliveryTag, 'body' => $message->getBody(), 'queue' => $consumerMessage->getQueue()]
-                );
-                $result = $consumerMessage->consumeMessage($data, $message); // 调用消费者定义的实际业务处理方法
-                Log::debug(
-                    "------- {$consumerMessage->getQueue()} end -------",
-                    ['delivery_tag' => $deliveryTag, 'body' => $message->getBody(), 'result' => $result]
-                );
-            } catch (Throwable $e) {
-                // 捕获消费过程中发生的异常，记录错误日志
-                Log::error("消费异常" . $e->getMessage(), [
-                    'exception'    => $e,
-                    'delivery_tag' => $deliveryTag,
-                    'body'         => $message->getBody(),
-                    'queue'        => $consumerMessage->getQueue(),
-                ]);
-                // 处理消费失败的情况，根据配置决定是否重试
-                if ($consumerMessage->isRetry()) {
-                    // 获取当前重试次数，如果不存在则为 0
-                    $retryCount = app(AmqpRetry::class)->getRetryCount($messageId);
-                    if ($retryCount >= $consumerMessage->getRetryCount()) {
-                        Log::warning("超过最大重试次数，移动到死信队列「DLQ」", [
-                            'delivery_tag' => $deliveryTag,
-                            'body'         => $message->getBody(),
-                            'retry_count'  => $retryCount,
-                            'queue'        => $consumerMessage->getQueue(),
-                        ]);
-                        // 达到最大重试次数，不重新入队，直接拒绝，会进入死信队列，清理Redis次数
-                        app(AmqpRetry::class)->clearRetryCount($messageId); // 从 Redis 删除重试计数
-                        $result = Result::DROP;
-                    } else {
-                        app(AmqpRetry::class)->setRetryCount($messageId, ++$retryCount);
-                        $result = Result::NACK;
-                    }
-                } else {
-                    $result = Result::DROP;
-                }
-            }
-            // 根据消费结果进行不同的处理
-            switch ($result) {
-                case Result::ACK:
-                    Log::debug($deliveryTag . ' acked.');
+        // 如果消息没有 message_id，无法追踪重试次数，直接拒绝（不重新入队）
+        if (empty($messageId)) {
+            Log::warning("消息没有message_id，无法跟踪重试计数", [
+                'delivery_tag' => $deliveryTag,
+                'body'         => $message->getBody(),
+                'queue'        => $consumerMessage->getQueue(),
+            ]);
+            $channel->basic_reject($deliveryTag, false); // false 表示不重新入队，通常会进入死信队列（如果配置了）
+            return;
+        }
+        try {
+            // 执行消费逻辑
+            $data   = $consumerMessage->unserialize($message->getBody()); // 反序列化消息体
+            Log::withContext(['message_id' => $messageId]);
+            Log::debug(
+                "------- {$consumerMessage->getQueue()} start -------",
+                ['delivery_tag' => $deliveryTag, 'body' => $message->getBody(), 'queue' => $consumerMessage->getQueue()]
+            );
+            $result = $consumerMessage->consumeMessage($data, $message); // 调用消费者定义的实际业务处理方法
+            Log::debug("------- {$consumerMessage->getQueue()} end -------", ['result' => $result]);
+        } catch (Throwable $e) {
+            // 捕获消费过程中发生的异常，记录错误日志
+            Log::error("消费异常" . $e->getMessage(), [
+                'exception'    => $e,
+                'delivery_tag' => $deliveryTag,
+                'body'         => $message->getBody(),
+                'queue'        => $consumerMessage->getQueue(),
+            ]);
+            // 处理消费失败的情况，根据配置决定是否重试
+            if ($consumerMessage->isRetry()) {
+                // 获取当前重试次数，如果不存在则为 0
+                $retryCount = app(AmqpRetry::class)->getRetryCount($messageId);
+                if ($retryCount >= $consumerMessage->getRetryCount()) {
+                    Log::warning("超过最大重试次数，移动到死信队列「DLQ」", [
+                        'delivery_tag' => $deliveryTag,
+                        'body'         => $message->getBody(),
+                        'retry_count'  => $retryCount,
+                        'queue'        => $consumerMessage->getQueue(),
+                    ]);
+                    // 达到最大重试次数，不重新入队，直接拒绝，会进入死信队列，清理Redis次数
                     app(AmqpRetry::class)->clearRetryCount($messageId); // 从 Redis 删除重试计数
-                    $channel->basic_ack($deliveryTag); // 确认消息已成功处理
-                    break;
-                case Result::NACK:
-                    Log::debug($deliveryTag . ' uacked.');
-                    $channel->basic_nack($deliveryTag, false, $consumerMessage->isRequeue());
-                    break;
-                case Result::REQUEUE:
-                    Log::debug($deliveryTag . ' requeued.');
-                    $channel->basic_reject($deliveryTag, $consumerMessage->isRequeue());
-                    break;
-                default:
-                    Log::debug($deliveryTag . ' rejected.');
-                    $channel->basic_reject($deliveryTag, false); // 拒绝消息，不重新入队
-                    break;
+                    $result = Result::DROP;
+                } else {
+                    app(AmqpRetry::class)->setRetryCount($messageId, ++$retryCount);
+                    $result = Result::NACK;
+                }
+            } else {
+                $result = Result::DROP;
             }
-        };
+        }
+        // 根据消费结果进行不同的处理
+        switch ($result) {
+            case Result::ACK:
+                Log::debug($deliveryTag . ' acked.');
+                app(AmqpRetry::class)->clearRetryCount($messageId); // 从 Redis 删除重试计数
+                $channel->basic_ack($deliveryTag); // 确认消息已成功处理
+                break;
+            case Result::NACK:
+                Log::debug($deliveryTag . ' uacked.');
+                $channel->basic_nack($deliveryTag, false, $consumerMessage->isRequeue());
+                break;
+            case Result::REQUEUE:
+                Log::debug($deliveryTag . ' requeued.');
+                $channel->basic_reject($deliveryTag, $consumerMessage->isRequeue());
+                break;
+            default:
+                Log::debug($deliveryTag . ' rejected.');
+                $channel->basic_reject($deliveryTag, false); // 拒绝消息，不重新入队
+                break;
+        }
     }
 
     /**
@@ -516,23 +512,13 @@ class AmqpManager
      */
     public function shutdown(): void
     {
-        try {
-            // 如果通道存在且处于打开状态，则关闭
-            if ($this->channel && $this->channel->is_open()) {
-                $this->channel->close();
-            }
-        } catch (Throwable $e) {
-            // 缓存交换机和队列不存在
-            $this->switchExchangeQueueCache($e);
-            Log::error("关闭AMQP通道失败: " . $e->getMessage());
+        // 如果通道存在且处于打开状态，则关闭
+        if ($this->channel && $this->channel->is_open()) {
+            $this->channel->close();
         }
-        try {
-            // 如果连接存在且处于连接状态，则关闭
-            if ($this->connection && $this->connection->isConnected()) {
-                $this->connection->close();
-            }
-        } catch (Throwable $e) {
-            Log::error("关闭AMQP连接失败: " . $e->getMessage());
+        // 如果连接存在且处于连接状态，则关闭
+        if ($this->connection && $this->connection->isConnected()) {
+            $this->connection->close();
         }
     }
 
@@ -603,4 +589,3 @@ class AmqpManager
         return (bool)Redis::hGet(AmqpRedisKey::AmqpDeclaredQueue->value, $queue);
     }
 }
-
