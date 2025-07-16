@@ -80,10 +80,20 @@ class AmqpManager
             $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
             $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
         );
-        // 创建 AMQP 通道
-        $this->channel = $this->connection->channel();
         // 记录当前连接类型
         $this->currentConnectionType = $type;
+    }
+
+    /**
+     * 获取或创建 channel
+     */
+    public function getChannel(): AMQPChannel
+    {
+        if (!isset($this->channel) || !$this->channel->is_open()) {
+            $this->channel = $this->connection->channel();
+        }
+
+        return $this->channel;
     }
 
     /**
@@ -102,7 +112,7 @@ class AmqpManager
          * @param int  $prefetchCount 消费者未确认消息的最大数量。这是核心限制。
          * @param bool $global        此 QoS 设置是否应用于整个通道（true）或仅当前消费者（false）。
          */
-        $this->channel->basic_qos(0, $this->prefetchCount, false); // global=false 表示作用于当前消费者
+        $this->getChannel()->basic_qos(0, $this->prefetchCount, false); // global=false 表示作用于当前消费者
 
         /* @var ProducerMessageInterface $producer */
         foreach ($this->producers as $producer) {
@@ -145,7 +155,7 @@ class AmqpManager
         // AMQP 被动检查
         try {
             // 用 passive 模式检查是否存在
-            $this->channel->exchange_declare(
+            $this->getChannel()->exchange_declare(
                 $builder->getExchange(),  // 交换机名称
                 $builder->getType(),      // 交换机类型 (direct, fanout, topic, headers)
                 true,             // 是否被动声明「true: 如果交换机不存在，会抛出异常。 false: 如果不存在，就创建它。」
@@ -178,7 +188,7 @@ class AmqpManager
         }
         try {
             Log::info("交换机 [{$builder->getExchange()}] 不存在 申明中...");
-            $this->channel->exchange_declare(
+            $this->getChannel()->exchange_declare(
                 $builder->getExchange(),    // 交换机名称
                 $builder->getType(),        // 交换机类型 (direct, fanout, topic, headers)
                 $builder->isPassive(),      // 是否被动声明「true: 如果交换机不存在，会抛出异常。 false: 如果不存在，就创建它。」
@@ -219,7 +229,7 @@ class AmqpManager
         // AMQP 被动检查
         try {
             // 先用 passive 模式检查队列是否存在
-            $this->channel->queue_declare(
+            $this->getChannel()->queue_declare(
                 $builder->getQueue(),     // 队列名称
                 true,                     // 是否被动声明「true: 如果不存在，会抛出异常。 false: 如果不存在，就创建它。」
                 $builder->isDurable(),    // 是否持久化（RabbitMQ 重启后队列不消失）
@@ -252,7 +262,7 @@ class AmqpManager
         }
         try {
             Log::info("队列 [{$builder->getQueue()}] 不存在 申明中...");
-            $this->channel->queue_declare(
+            $this->getChannel()->queue_declare(
                 $builder->getQueue(),     // 队列名称
                 $builder->isPassive(), // 是否被动声明（只检查队列是否存在，不创建）
                 $builder->isDurable(), // 是否持久化（RabbitMQ 重启后队列不消失）
@@ -268,12 +278,12 @@ class AmqpManager
             $routineKeys = (array)$message->getRoutingKey();
             foreach ($routineKeys as $routingKey) {
                 // 将队列绑定到交换机和路由键
-                $this->channel->queue_bind($message->getQueue(), $message->getExchange(), $routingKey);
+                $this->getChannel()->queue_bind($message->getQueue(), $message->getExchange(), $routingKey);
             }
 
             // 如果路由键为空且交换机类型为 FANOUT，则不使用路由键进行绑定
             if (empty($routineKeys) && $message->getType() === Type::FANOUT) {
-                $this->channel->queue_bind($message->getQueue(), $message->getExchange());
+                $this->getChannel()->queue_bind($message->getQueue(), $message->getExchange());
             }
 
             // 如果消费者消息中定义了 QoS 设置，则重新设置
@@ -281,7 +291,7 @@ class AmqpManager
                 $size   = $qos['prefetch_size'] ?? null;
                 $count  = $qos['prefetch_count'] ?? null;
                 $global = $qos['global'] ?? null;
-                $this->channel->basic_qos($size, $count, $global);
+                $this->getChannel()->basic_qos($size, $count, $global);
             }
 
             return true;
@@ -400,7 +410,7 @@ class AmqpManager
         try {
             // 连接
             $this->connect('consumer');
-            $this->channel->basic_qos(0, $this->prefetchCount, false); // global=false 表示作用于当前消费者
+            $this->getChannel()->basic_qos(0, $this->prefetchCount, false); // global=false 表示作用于当前消费者
             // 注册基本消费者回调
             $this->channel->basic_consume(
                 $queueName,   // 要消费的队列名称
@@ -414,15 +424,12 @@ class AmqpManager
                     $this->getCallback($consumer, $message)();
                 }
             );
-            // 启动消费者监听循环, 持续等待消息，直到通道不再处于消费状态
-            while ($this->channel->is_consuming()) {
-                $this->channel->wait();           // 阻塞等待消息，处理 IO 事件
-            }
         } catch (Throwable $exception) {
             $this->switchExchangeQueueCache($exception);
-            $this->shutdown();
             throw $exception;
         }
+        // 启动消费者监听循环
+        $this->startConsuming($consumer);
     }
 
     /**
@@ -515,6 +522,114 @@ class AmqpManager
     }
 
     /**
+     * 启动消费者监听循环。
+     * 这个方法会使脚本持续运行，等待和处理来自 RabbitMQ 的消息，并包含自动重连和心跳机制。
+     * @param ConsumerMessageInterface $consumer 消费者消息处理器实例，用于获取队列信息
+     */
+    public function startConsuming(ConsumerMessageInterface $consumer): void
+    {
+        // 获取重试配置
+        $retryEnabled = config('amqp.retry.enabled', true);
+        $maxAttempts  = config('amqp.retry.max_attempts', 5);
+        $backoffBase  = config('amqp.retry.backoff_base', 2);
+
+        // 初始化上次心跳时间
+        $lastHeartbeat = microtime(true);
+
+        // 持续等待消息，直到通道不再处于消费状态
+        while ($this->channel->is_consuming()) {
+            try {
+                $this->channel->wait();           // 阻塞等待消息，处理 IO 事件
+                $lastHeartbeat = microtime(true); // 成功接收或等待到消息后更新心跳时间
+            } catch (Throwable $e) {
+                // 捕获等待过程中的错误，记录日志
+                Log::error("AMQP wait error: " . $e->getMessage(), [
+                    'code'  => $e->getCode(),
+                    'file'  => $e->getFile(),
+                    'line'  => $e->getLine(),
+                    'queue' => $consumer->getQueue(),
+                ]);
+
+                $currentTime = microtime(true);
+                // 如果长时间没有心跳（即没有消息或连接中断），尝试重连
+                if ($currentTime - $lastHeartbeat > config('amqp.consumer.heartbeat')) {
+                    Log::info("No heartbeat received for Amqp::HEARTBEAT_TIMEOUT seconds, attempting to reconnect...");
+
+                    // 检查是否启用了自动重连
+                    if (!$retryEnabled) {
+                        Log::warning("Automatic reconnection is disabled.");
+                        return; // 如果禁用重连，则停止消费者进程
+                    }
+
+                    $attempt     = 0;
+                    $reconnected = false;
+
+                    // 循环尝试重连，直到达到最大尝试次数
+                    while ($attempt < $maxAttempts) {
+                        $attempt++;
+
+                        $reconnected = $this->reconnect(); // 执行重连操作
+                        if ($reconnected) {
+                            Log::info("Reconnected successfully after $attempt attempt(s).");
+                            // 重连成功后更新心跳时间
+                            $lastHeartbeat = microtime(true);
+                            // 成功重连，跳出重试循环
+                            break;
+                        }
+
+                        $waitSeconds = $backoffBase ** $attempt; // 计算指数退避等待时间 (2的N次方秒)
+                        Log::warning("Reconnection attempt $attempt failed. Retrying in $waitSeconds seconds...");
+                        sleep($waitSeconds); // 等待指定时间后再次尝试
+                    }
+
+                    // 如果所有重试都失败了
+                    if (!$reconnected) {
+                        Log::error("Failed to reconnect after $maxAttempts attempts. Stopping consumer.");
+                        return; // 无法重连，停止消费者进程
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 重新连接 AMQP 服务器并重新初始化通道、QoS、交换机和队列。
+     * @return bool 返回 true 表示重连成功，false 表示失败。
+     */
+    protected function reconnect(): bool
+    {
+        try {
+            // 关闭现有通道（如果打开）
+            if ($this->channel->is_open()) {
+                $this->channel->close();
+            }
+            // 如果连接仍然连接着，则尝试重新连接（通过内部机制）
+            if ($this->connection->isConnected()) {
+                $this->connection->reconnect(); // 尝试利用现有连接对象重新连接
+            } else {
+                // 如果连接已完全断开，则根据配置重新创建新地连接对象
+                $this->connect('consumer');
+            }
+            // 重新创建通道
+            $this->channel = $this->connection->channel();
+            // 检查新通道是否成功打开
+            if (!$this->channel->is_open()) {
+                throw new ChannelException("Failed to reopen AMQP channel after reconnect.");
+            }
+            // 重新设置 QoS（预取数量），因为通道是新的
+            $this->channel->basic_qos(0, $this->prefetchCount, false);
+            Log::info("AMQP connection re-established successfully.");
+
+            return true; // 重连成功
+        } catch (Throwable $e) {
+            // 捕获重连过程中的异常并记录错误
+            Log::error("Failed to reconnect to AMQP: " . $e->getMessage(), ['exception' => $e]);
+
+            return false; // 重连失败
+        }
+    }
+
+    /**
      * 关闭 AMQP 连接和通道，用于 `register_shutdown_function`。
      * 这个方法通常会在脚本结束时被调用，以确保资源被正确释放。
      */
@@ -522,7 +637,7 @@ class AmqpManager
     {
         try {
             // 如果通道存在且处于打开状态，则关闭
-            if ($this->channel && $this->channel->is_open()) {
+            if ($this->channel->is_open()) {
                 $this->channel->close();
             }
         } catch (Throwable $e) {
@@ -530,9 +645,10 @@ class AmqpManager
             $this->switchExchangeQueueCache($e);
             Log::error("关闭AMQP通道失败: " . $e->getMessage());
         }
+
         try {
             // 如果连接存在且处于连接状态，则关闭
-            if ($this->connection && $this->connection->isConnected()) {
+            if ($this->connection->isConnected()) {
                 $this->connection->close();
             }
         } catch (Throwable $e) {

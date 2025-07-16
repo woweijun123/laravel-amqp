@@ -41,4 +41,14 @@ return [
         // 建议值：心跳的1~1.5倍，例如 10-15 秒。
         'read_write_timeout' => env('RABBITMQ_CONSUMER_READ_WRITE_TIMEOUT', 12),
     ],
+    // AMQP 消息重试机制的配置
+    'retry'    => [
+        // 是否启用消息重试机制
+        'enabled'      => env('RABBITMQ_RETRY_ENABLED', true),
+        // 消息最大重试次数
+        'max_attempts' => env('RABBITMQ_RETRY_MAX_ATTEMPTS', 5),
+        // 重试间隔的退避基数（单位：秒）。
+        // 例如，如果基数为 2，则第一次重试等待 2^1=2 秒，第二次等待 2^2=4 秒，以此类推。
+        'backoff_base' => env('RABBITMQ_RETRY_BACKOFF_BASE', 2),
+    ],
 ];
