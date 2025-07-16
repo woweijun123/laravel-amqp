@@ -28,17 +28,14 @@ return [
     'consumer' => [
         // 心跳：对于长生命周期的消费者至关重要，用于检测死连接。
         // RabbitMQ 默认心跳是 60 秒，客户端通常设置其三分之一。
-        // 建议值：10-20 秒。
-        'heartbeat' => env('RABBITMQ_CONSUMER_HEARTBEAT', 10),
+        'heartbeat' => env('RABBITMQ_CONSUMER_HEARTBEAT', 60),
         // TCP Keepalive：同样，通常由操作系统控制。
         // 建议值：false。
         'keepalive' => env('RABBITMQ_CONSUMER_KEEPALIVE', true),
         // TCP 连接超时：消费者启动时连接 Broker 的超时时间。
-        // 建议值：根据网络稳定性和 RabbitMQ 启动时间适当延长，例如 10-30 秒。
-        'connection_timeout' => env('RABBITMQ_CONSUMER_CONNECTION_TIMEOUT', 5),
+        'connection_timeout' => env('RABBITMQ_CONSUMER_CONNECTION_TIMEOUT', 10),
         // 读写超时：消费者与 Broker 之间维持通信和收发消息的超时时间。
-        // 必须大于心跳间隔，否则心跳会超时。
-        // 建议值：心跳的1~1.5倍，例如 10-15 秒。
-        'read_write_timeout' => env('RABBITMQ_CONSUMER_READ_WRITE_TIMEOUT', 12),
+        // 必须大于心跳间隔，否则心跳会超时，建议值：心跳的1~1.5倍，例如 10-15 秒。
+        'read_write_timeout' => env('RABBITMQ_CONSUMER_READ_WRITE_TIMEOUT', 70),
     ],
 ];
