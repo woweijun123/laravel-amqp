@@ -107,15 +107,15 @@ interface ConsumerMessageInterface extends MessageInterface
 
     /**
      * read_write_timeout: 读写超时
-     * @return bool
+     * @return int|null
      */
-    public function readWriteTimeout(): int;
+    public function readWriteTimeout(): int|null;
 
     /**
      * heartbeat: 心跳间隔
-     * @return bool
+     * @return int|null
      */
-    public function heartbeat(): int;
+    public function heartbeat(): int|null;
 
     /**
      * arguments: 额外的参数
