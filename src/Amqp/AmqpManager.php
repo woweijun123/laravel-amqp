@@ -124,7 +124,7 @@ class AmqpManager
     }
 
     /**
-     * 判断交换机是否存在（优先缓存 -> Redis -> Passive 声明）
+     * 判断交换机是否存在
      */
     public function exchangeExists(ExchangeBuilder $builder): bool
     {
@@ -132,31 +132,9 @@ class AmqpManager
         if (!empty($this->declaredExchanges[$builder->getExchange()])) {
             return $this->declaredExchanges[$builder->getExchange()];
         }
-
         // Redis 缓存
         if ($this->getExchangeCache($builder->getExchange())) {
             return $this->declaredExchanges[$builder->getExchange()] = true;
-        }
-
-        // AMQP 被动检查
-        try {
-            // 用 passive 模式检查是否存在
-            $this->channel->exchange_declare(
-                $builder->getExchange(),  // 交换机名称
-                $builder->getType(),      // 交换机类型 (direct, fanout, topic, headers)
-                true,             // 是否被动声明「true: 如果交换机不存在，会抛出异常。 false: 如果不存在，就创建它。」
-                $builder->isDurable(),    // 是否持久化
-                $builder->isAutoDelete(), // 是否自动删除
-                $builder->isInternal(),   // 是否为内部交换机（客户端不能直接发布消息到它）
-                $builder->isNowait(),     // 是否等待服务器响应
-                $builder->getArguments(), // 其他可选参数
-                $builder->getTicket()     // 队列的访问权限凭证
-            );
-            $this->setExchangeCache($builder->getExchange());
-            return $this->declaredExchanges[$builder->getExchange()] = true;
-        } catch (Throwable $e) {
-            $this->setExchangeCache($builder->getExchange());
-            return $this->declaredExchanges[$builder->getExchange()] = false;
         }
     }
 
@@ -187,7 +165,6 @@ class AmqpManager
             );
             $this->setExchangeCache($builder->getExchange());
             $this->declaredExchanges[$builder->getExchange()] = true;
-
             return true;
         } catch (Throwable $exception) {
             Log::error("[{$message->getExchange()}] 交换机申明失败" . $exception->getMessage());
@@ -198,7 +175,7 @@ class AmqpManager
     }
 
     /**
-     * 判断队列是否存在（优先缓存 -> Redis -> Passive 声明）
+     * 判断队列是否存在
      */
     public function queueExists(QueueBuilder $builder): bool
     {
@@ -206,30 +183,9 @@ class AmqpManager
         if (!empty($this->declaredQueues[$builder->getQueue()])) {
             return $this->declaredQueues[$builder->getQueue()];
         }
-
         // Redis 缓存
         if ($this->getQueueCache($builder->getQueue())) {
             return $this->declaredQueues[$builder->getQueue()] = true;
-        }
-
-        // AMQP 被动检查
-        try {
-            // 先用 passive 模式检查队列是否存在
-            $this->channel->queue_declare(
-                $builder->getQueue(),     // 队列名称
-                true,                     // 是否被动声明「true: 如果不存在，会抛出异常。 false: 如果不存在，就创建它。」
-                $builder->isDurable(),    // 是否持久化（RabbitMQ 重启后队列不消失）
-                $builder->isExclusive(),  // 是否独占队列（只被当前连接使用，连接关闭后自动删除）
-                $builder->isAutoDelete(), // 是否自动删除（最后一个消费者断开后自动删除）
-                $builder->isNowait(),     // 是否等待服务器响应
-                $builder->getArguments(), // 其他可选参数（如 TTL, DLX 等）
-                $builder->getTicket()     // 访问权限票据
-            );
-            $this->setQueueCache($builder->getQueue());
-            return $this->declaredQueues[$builder->getQueue()] = true;
-        } catch (Throwable $e) {
-            $this->setQueueCache($builder->getQueue(), 0);
-            return $this->declaredQueues[$builder->getQueue()] = false;
         }
     }
 
