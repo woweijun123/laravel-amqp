@@ -2,28 +2,26 @@
 
 namespace Riven\Amqp;
 
-use Riven\Amqp\Builder\ExchangeBuilder;
-use Riven\Amqp\Builder\QueueBuilder;
-use Riven\Amqp\Enum\AmqpRedisKey;
-use Riven\Amqp\Exception\ChannelException;
-use Riven\Amqp\Exception\MessageException;
-use Riven\Amqp\Message\ConsumerMessageInterface;
-use Riven\Amqp\Message\MessageInterface;
-use Riven\Amqp\Message\ProducerMessageInterface;
-use Riven\Amqp\Message\Type;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use InvalidArgumentException;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
+use Riven\Amqp\Builder\ExchangeBuilder;
+use Riven\Amqp\Builder\QueueBuilder;
+use Riven\Amqp\Enum\AmqpRedisKey;
+use Riven\Amqp\Exception\MessageException;
+use Riven\Amqp\Message\ConsumerMessageInterface;
+use Riven\Amqp\Message\MessageInterface;
+use Riven\Amqp\Message\ProducerMessageInterface;
+use Riven\Amqp\Message\Type;
 use Throwable;
 
 class AmqpManager
 {
     private AMQPStreamConnection $connection; // AMQP 链接
     private AMQPChannel $channel; // AMQP 通道
-    private int $prefetchCount = 100;  // 消费者每次从队列预取的消息数量
     private int $cacheTime = 3600; // 缓存时间「秒」
     private array $declaredExchanges = []; // 交换机缓存
     private array $declaredQueues = []; // 队列缓存
@@ -45,7 +43,7 @@ class AmqpManager
      * @return void
      * @throws Throwable
      */
-    private function connect(string $type = ''): void
+    private function connect(string $type = '', ConsumerMessageInterface $consumerMessage = null): void
     {
         if (isset($this->connection) && $this->connection->isConnected()) {
             // 如果当前连接类型与请求类型一致，则直接返回现有连接
@@ -59,6 +57,17 @@ class AmqpManager
         if ($type == 'consumer') {
             $config = array_merge($config, config('amqp.consumer'));
         }
+        $readWriteTimeout = $config['read_write_timeout'];
+        $keepalive = $config['keepalive'];
+        // 如果当前消费者实例设置了读写超时，则覆盖全局配置
+        if ($consumerMessage instanceof ConsumerMessageInterface) {
+            if (is_numeric($consumerMessage->readWriteTimeout())) {
+                $readWriteTimeout = $consumerMessage->readWriteTimeout();
+            }
+            if (is_numeric($consumerMessage->heartbeat())) {
+                $keepalive = $consumerMessage->heartbeat();
+            }
+        }
         // 建立新连接
         $this->connection = new AMQPStreamConnection(
             $config['host'], // RabbitMQ 服务器地址
@@ -71,9 +80,9 @@ class AmqpManager
             null, // 客户端属性数组，可用于发送自定义连接属性给 Broker
             'en_US', // Locale，语言/地区设置
             $config['connection_timeout'], // TCP 连接超时时间（秒）
-            $config['read_write_timeout'], // 读写操作超时时间（秒）
+            $readWriteTimeout, // 读写操作超时时间（秒）
             null, // 回调函数，用于处理连接异常（不常用）
-            $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
+            $keepalive, // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
             $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
         );
         // 创建 AMQP 通道
@@ -92,14 +101,6 @@ class AmqpManager
     {
         // 创建 AMQP 链接
         $this->connect();
-        /**
-         * 设置 QoS (Quality of Service) 预取数量。
-         * @param int  $prefetchSize  预取消息的最大字节数（0 表示不限制）。
-         * @param int  $prefetchCount 消费者未确认消息的最大数量。这是核心限制。
-         * @param bool $global        此 QoS 设置是否应用于整个通道（true）或仅当前消费者（false）。
-         */
-        $this->channel->basic_qos(0, $this->prefetchCount, false); // global=false 表示作用于当前消费者
-
         /* @var ProducerMessageInterface $producer */
         foreach ($this->producers as $producer) {
             $producer = app($producer);
@@ -207,7 +208,7 @@ class AmqpManager
         try {
             Log::info("队列 [{$builder->getQueue()}] 不存在 申明中...");
             $this->channel->queue_declare(
-                $builder->getQueue(),     // 队列名称
+                $builder->getQueue(), // 队列名称
                 $builder->isPassive(), // 是否被动声明（只检查队列是否存在，不创建）
                 $builder->isDurable(), // 是否持久化（RabbitMQ 重启后队列不消失）
                 $builder->isExclusive(), // 是否独占队列（只被当前连接使用，连接关闭后自动删除）
@@ -229,15 +230,6 @@ class AmqpManager
             if (empty($routineKeys) && $message->getType() === Type::FANOUT) {
                 $this->channel->queue_bind($message->getQueue(), $message->getExchange());
             }
-
-            // 如果消费者消息中定义了 QoS 设置，则重新设置
-            if (is_array($qos = $message->getQos())) {
-                $size   = $qos['prefetch_size'] ?? null;
-                $count  = $qos['prefetch_count'] ?? null;
-                $global = $qos['global'] ?? null;
-                $this->channel->basic_qos($size, $count, $global);
-            }
-
             return true;
         } catch (Throwable $exception) {
             Log::error("[{$builder->getQueue()}] 队列申明失败" . $exception->getMessage());
@@ -251,8 +243,8 @@ class AmqpManager
      * 发送消息到指定交换机。
      * 支持发布确认 (Publisher Confirm) 机制。
      * @param ProducerMessageInterface $producerMessage 生产者消息对象
-     * @param bool                     $confirm         是否启用发布确认
-     * @param int                      $timeout         发布确认的等待超时时间（秒）
+     * @param bool $confirm 是否启用发布确认
+     * @param int $timeout 发布确认的等待超时时间（秒）
      * @return bool 消息是否成功发布并被Broker确认
      * @throws InvalidArgumentException 如果交换机未在配置中找到
      * @throws Throwable 如果发布过程中发生错误
@@ -260,7 +252,7 @@ class AmqpManager
     public function produce(ProducerMessageInterface $producerMessage, bool $confirm = false, int $timeout = 5): bool
     {
         $confirmed = false; // 消息是否被 Broker 确认
-        $nacked    = false;    // 消息是否被 Broker 拒绝
+        $nacked = false;    // 消息是否被 Broker 拒绝
         try {
             // 每次发消息都新建一个 channel, 避免覆盖回调函数问题：Server ack'ed unknown delivery_tag "2"
             $this->channel = $this->connection->channel();
@@ -270,9 +262,9 @@ class AmqpManager
                 // 设置 ack 处理器：当消息被 Broker 确认时调用
                 $this->channel->set_ack_handler(function (AMQPMessage $message) use (&$confirmed) {
                     Log::debug("[Ack received for delivery]", [
-                        'exchange'     => $message->getExchange(),
+                        'exchange' => $message->getExchange(),
                         'delivery_tag' => $message->getDeliveryTag(),
-                        'body'         => $message->getBody(),
+                        'body' => $message->getBody(),
                     ]);
                     // 执行后清空监听器, 防止重复执行
                     $this->channel->set_ack_handler(fn() => null);
@@ -281,9 +273,9 @@ class AmqpManager
                 // 设置 nack 处理器：当消息被 Broker 拒绝时调用（例如：队列不存在，消息路由失败等）
                 $this->channel->set_nack_handler(function (AMQPMessage $message) use (&$nacked) {
                     Log::error("[Nack received for delivery]", [
-                        'exchange'     => $message->getExchange(),
+                        'exchange' => $message->getExchange(),
                         'delivery_tag' => $message->getDeliveryTag(),
-                        'body'         => $message->getBody(),
+                        'body' => $message->getBody(),
                     ]);
                     // 执行后清空监听器, 防止重复执行
                     $this->channel->set_nack_handler(fn() => null);
@@ -291,10 +283,10 @@ class AmqpManager
                 });
                 // 设置 Return 监听器，当消息无法路由且设置了 mandatory 标志时会触发
                 $this->channel->set_return_listener(function (
-                    int $replyCode,
-                    string $replyText,
-                    string $exchange,
-                    string $routingKey,
+                    int         $replyCode,
+                    string      $replyText,
+                    string      $exchange,
+                    string      $routingKey,
                     AMQPMessage $message
                 ) use ($producerMessage) {
                     $producerMessage->onMandatoryReturn($replyCode, $replyText, $exchange, $routingKey, $message);
@@ -350,27 +342,33 @@ class AmqpManager
         try {
             /* @var ConsumerMessageInterface $consumer */
             $consumer = app($this->consumers[$queueName]);
-            // 构建唯一的消费者标签，用于标识当前消费者
-            $consumerTag = "consumer_{$queueName}_" . uniqid();
             // 连接
-            $this->connect('consumer');
-            $this->channel->basic_qos(0, $this->prefetchCount, false); // global=false 表示作用于当前消费者
+            $this->connect('consumer', $consumer);
+            // 设置 QoS 「Quality of Service」 预取数量
+            if (is_array($qos = $consumer->getQos())) {
+                $size = $qos['prefetch_size'] ?? 0; // 预取消息的最大字节数（0 表示不限制）
+                $count = $qos['prefetch_count'] ?? 1; // 消费者未确认消息的最大数量
+                $global = $qos['global'] ?? false; // 设置是否应用于整个通道（true）或仅当前消费者（false）
+                $this->channel->basic_qos($size, $count, $global);
+            }
             // 注册基本消费者回调
             $this->channel->basic_consume(
                 $queueName, // 要消费的队列名称
-                $consumerTag, // 消费者标签
-                false, // no_local: 不接收发布者自己发布的消息（通常设置为 false）
-                false, // no_ack: 启用手动消息确认（false 表示需要手动 ack/nack）
-                false, // exclusive: 非排他性消费（允许多个消费者共享队列）
-                false, // nowait: 阻塞等待服务器响应
+                $consumer->getConsumerTag(), // 消费者标签
+                $consumer->isNoLocal(), // no_local: 不接收发布者自己发布的消息（通常设置为 false）
+                $consumer->isNoAck(), // no_ack: 启用手动消息确认（false 表示需要手动 ack/nack）
+                $consumer->isExclusive(), // exclusive: 独占队列（true 表示仅当前消费者可访问）
+                $consumer->isNowait(), // nowait: 不等待服务器响应（true 表示不等待服务器响应）
                 function (AMQPMessage $message) use ($consumer) {
                     // 包装消费者回调函数，以处理消息确认/拒绝逻辑
                     $this->handleCallback($consumer, $message);
-                }
+                },
+                $consumer->getTicket(),
+                $consumer->getArguments()
             );
             // 启动消费者监听循环, 持续等待消息，直到通道不再处于消费状态
             while ($this->channel->is_consuming()) {
-                $this->channel->wait();           // 阻塞等待消息，处理 IO 事件
+                $this->channel->wait(); // 阻塞等待消息，处理 IO 事件
             }
         } catch (Throwable $exception) {
             $this->switchExchangeQueueCache($exception);
@@ -388,23 +386,23 @@ class AmqpManager
      */
     protected function handleCallback(ConsumerMessageInterface $consumerMessage, AMQPMessage $message)
     {
-        $channel     = $message->getChannel();
+        $channel = $message->getChannel();
         $deliveryTag = $message->getDeliveryTag(); // 消息的投递标签，用于确认/拒绝
-        $messageId   = $message->get('message_id'); // 获取消息 ID，用于追踪重试次数
+        $messageId = $message->get('message_id'); // 获取消息 ID，用于追踪重试次数
 
         // 如果消息没有 message_id，无法追踪重试次数，直接拒绝（不重新入队）
         if (empty($messageId)) {
             Log::warning("消息没有message_id，无法跟踪重试计数", [
                 'delivery_tag' => $deliveryTag,
-                'body'         => $message->getBody(),
-                'queue'        => $consumerMessage->getQueue(),
+                'body' => $message->getBody(),
+                'queue' => $consumerMessage->getQueue(),
             ]);
             $channel->basic_reject($deliveryTag, false); // false 表示不重新入队，通常会进入死信队列（如果配置了）
             return;
         }
         try {
             // 执行消费逻辑
-            $data   = $consumerMessage->unserialize($message->getBody()); // 反序列化消息体
+            $data = $consumerMessage->unserialize($message->getBody()); // 反序列化消息体
             Log::withContext(['message_id' => $messageId]);
             Log::debug(
                 "------- {$consumerMessage->getQueue()} start -------",
@@ -415,10 +413,10 @@ class AmqpManager
         } catch (Throwable $e) {
             // 捕获消费过程中发生的异常，记录错误日志
             Log::error("消费异常" . $e->getMessage(), [
-                'exception'    => $e,
+                'exception' => $e,
                 'delivery_tag' => $deliveryTag,
-                'body'         => $message->getBody(),
-                'queue'        => $consumerMessage->getQueue(),
+                'body' => $message->getBody(),
+                'queue' => $consumerMessage->getQueue(),
             ]);
             // 处理消费失败的情况，根据配置决定是否重试
             if ($consumerMessage->isRetry()) {
@@ -427,9 +425,9 @@ class AmqpManager
                 if ($retryCount >= $consumerMessage->getRetryCount()) {
                     Log::warning("超过最大重试次数，移动到死信队列「DLQ」", [
                         'delivery_tag' => $deliveryTag,
-                        'body'         => $message->getBody(),
-                        'retry_count'  => $retryCount,
-                        'queue'        => $consumerMessage->getQueue(),
+                        'body' => $message->getBody(),
+                        'retry_count' => $retryCount,
+                        'queue' => $consumerMessage->getQueue(),
                     ]);
                     // 达到最大重试次数，不重新入队，直接拒绝，会进入死信队列，清理Redis次数
                     app(AmqpRetry::class)->clearRetryCount($messageId); // 从 Redis 删除重试计数

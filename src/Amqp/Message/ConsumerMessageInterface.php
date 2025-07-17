@@ -82,6 +82,54 @@ interface ConsumerMessageInterface extends MessageInterface
     public function getConsumerTag(): string;
 
     /**
+     * no_local: 不接收发布者自己发布的消息（通常设置为 false）
+     * @return bool
+     */
+    public function isNoLocal(): bool;
+
+    /**
+     * no_ack: 启用手动消息确认（false 表示需要手动 ack/nack）
+     * @return bool
+     */
+    public function isNoAck(): bool;
+
+    /**
+     * exclusive: 独占队列（true 表示仅当前消费者可访问）
+     * @return bool
+     */
+    public function isExclusive(): bool;
+
+    /**
+     * nowait: 不等待服务器响应（true 表示不等待服务器响应）
+     * @return bool
+     */
+    public function isNowait(): bool;
+
+    /**
+     * read_write_timeout: 读写超时
+     * @return bool
+     */
+    public function readWriteTimeout(): int;
+
+    /**
+     * heartbeat: 心跳间隔
+     * @return bool
+     */
+    public function heartbeat(): int;
+
+    /**
+     * arguments: 额外的参数
+     * @return array
+     */
+    public function getArguments(): array;
+
+    /**
+     * ticket: 队列的访问权限凭证
+     * @return int|null
+     */
+    public function getTicket(): ?int;
+
+    /**
      * 判断消费者是否启用。
      *
      * @return bool

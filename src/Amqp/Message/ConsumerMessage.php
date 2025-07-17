@@ -42,6 +42,60 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
     protected bool $retry = false;
 
     /**
+     * 获取消费者标签「Consumer Tag」, 在 AMQP 中用于唯一标识一个消费者
+     * @var null|string
+     */
+    protected $consumerTag = null;
+
+    /**
+     * 是否接收发布者自己发布的消息
+     * @var bool
+     */
+    protected $noLocal = false;
+
+    /**
+     * 手动消息确认（false 表示需要手动 ack/nack）
+     * @var bool
+     */
+    protected $noAck = false;
+
+    /**
+     * 队列独占（false 表示队列可以被多个消费者同时访问）
+     * @var bool
+     */
+    protected $exclusive = false;
+
+    /**
+     * 队列独占（false 表示队列可以被多个消费者同时访问）
+     * @var bool
+     */
+    protected $nowait = false;
+
+    /**
+     * 队列参数
+     * @var array
+     */
+    protected $arguments = [];
+
+    /**
+     * 队列票据
+     * @var null
+     */
+    protected $ticket = null;
+
+    /**
+     * 读写超时
+     * @var null
+     */
+    protected $readWriteTimeout = null;
+
+    /**
+     * 心跳间隔
+     * @var null
+     */
+    protected $heartbeat = null;
+
+    /**
      * 消息处理失败时重试次数
      * @var int
      */
@@ -54,16 +108,16 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
     protected array|string $routingKey = [];
 
     /**
-     * Qos (Quality of Service) 设置
+     * Qos 「Quality of Service」 设置
      * prefetch_size: 预取消息的最大字节数
      * prefetch_count: 每次从队列中预取的消息数量
      * global: 是否将 Qos 设置应用于所有消费者
      * @var array|null
      */
     protected ?array $qos = [
-        'prefetch_size'  => 0,
+        'prefetch_size' => 0,
         'prefetch_count' => 1, // 默认一次处理一条消息
-        'global'         => false,
+        'global' => false,
     ];
 
     /**
@@ -199,7 +253,79 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
      */
     public function getConsumerTag(): string
     {
-        return ''; // 默认返回空字符串，可由子类重写生成唯一标签
+        return $this->consumerTag ?: "consumer_{$this->getQueue()}_" . uniqid(); // 默认返回空字符串，可由子类重写生成唯一标签
+    }
+
+    /**
+     * no_local: 不接收发布者自己发布的消息（通常设置为 false）
+     * @return bool
+     */
+    public function isNoLocal(): bool
+    {
+        return $this->noLocal;
+    }
+
+    /**
+     * no_ack: 启用手动消息确认（false 表示需要手动 ack/nack）
+     * @return bool
+     */
+    public function isNoAck(): bool
+    {
+        return $this->noAck;
+    }
+
+    /**
+     * exclusive: 独占队列（true 表示仅当前消费者可访问）
+     * @return bool
+     */
+    public function isExclusive(): bool
+    {
+        return $this->exclusive;
+    }
+
+    /**
+     * nowait: 不等待服务器响应（true 表示不等待服务器响应）
+     * @return bool
+     */
+    public function isNowait(): bool
+    {
+        return $this->nowait;
+    }
+
+    /**
+     * read_write_timeout: 读写超时
+     * @return int|null
+     */
+    public function readWriteTimeout(): int|null
+    {
+        return $this->readWriteTimeout;
+    }
+
+    /**
+     * heartbeat: 心跳间隔
+     * @return int|null
+     */
+    public function heartbeat(): int|null
+    {
+        return $this->heartbeat;
+    }
+
+    /**
+     * arguments: 额外的参数
+     * @return array
+     */
+    public function getArguments(): array
+    {
+        return $this->arguments;
+    }
+
+    /**
+     * ticket: 队列的访问权限凭证
+     * @return int|null
+     */
+    public function getTicket(): ?int
+    {
+        return $this->ticket;
     }
 
     /**
