@@ -136,6 +136,7 @@ class AmqpManager
         if ($this->getExchangeCache($builder->getExchange())) {
             return $this->declaredExchanges[$builder->getExchange()] = true;
         }
+        return false;
     }
 
     /**
@@ -187,6 +188,7 @@ class AmqpManager
         if ($this->getQueueCache($builder->getQueue())) {
             return $this->declaredQueues[$builder->getQueue()] = true;
         }
+        return false;
     }
 
     /**
