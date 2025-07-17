@@ -58,14 +58,14 @@ class AmqpManager
             $config = array_merge($config, config('amqp.consumer'));
         }
         $readWriteTimeout = $config['read_write_timeout'];
-        $keepalive = $config['keepalive'];
+        $heartbeat = $config['heartbeat'];
         // 如果当前消费者实例设置了读写超时，则覆盖全局配置
         if ($consumerMessage instanceof ConsumerMessageInterface) {
             if (is_numeric($consumerMessage->readWriteTimeout())) {
                 $readWriteTimeout = $consumerMessage->readWriteTimeout();
             }
             if (is_numeric($consumerMessage->heartbeat())) {
-                $keepalive = $consumerMessage->heartbeat();
+                $heartbeat = $consumerMessage->heartbeat();
             }
         }
         // 建立新连接
@@ -82,8 +82,8 @@ class AmqpManager
             $config['connection_timeout'], // TCP 连接超时时间（秒）
             $readWriteTimeout, // 读写操作超时时间（秒）
             null, // 回调函数，用于处理连接异常（不常用）
-            $keepalive, // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
-            $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
+            $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
+            $heartbeat // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
         );
         // 创建 AMQP 通道
         $this->channel = $this->connection->channel();
