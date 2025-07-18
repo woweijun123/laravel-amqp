@@ -2,6 +2,7 @@
 
 namespace Riven\Amqp;
 
+use Exception;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use InvalidArgumentException;
@@ -39,9 +40,11 @@ class AmqpManager
     }
 
     /**
+     * 初始化 AMQP 连接和通道。
      * @param string $type
+     * @param ConsumerMessageInterface|null $consumerMessage
      * @return void
-     * @throws Throwable
+     * @throws Exception
      */
     private function connect(string $type = '', ConsumerMessageInterface $consumerMessage = null): void
     {
@@ -302,13 +305,6 @@ class AmqpManager
         } catch (Throwable $exception) {
             // 缓存交换机和队列不存在
             $this->switchExchangeQueueCache($exception);
-            // 捕获异常，关闭通道和连接，并重新抛出异常
-            if (isset($this->channel) && $this->channel->is_open()) {
-                $this->channel->close();
-            }
-            if (isset($this->connection) && $this->connection->isConnected()) {
-                $this->connection->close();
-            }
             throw $exception;
         }
 
@@ -453,15 +449,17 @@ class AmqpManager
     /**
      * 关闭 AMQP 连接和通道，用于 `register_shutdown_function`。
      * 这个方法通常会在脚本结束时被调用，以确保资源被正确释放。
+     * @return void
+     * @throws Exception
      */
     public function shutdown(): void
     {
         // 如果通道存在且处于打开状态，则关闭
-        if ($this->channel && $this->channel->is_open()) {
+        if ($this->channel->is_open()) {
             $this->channel->close();
         }
         // 如果连接存在且处于连接状态，则关闭
-        if ($this->connection && $this->connection->isConnected()) {
+        if ($this->connection->isConnected()) {
             $this->connection->close();
         }
     }
