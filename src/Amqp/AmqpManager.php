@@ -255,7 +255,7 @@ class AmqpManager
         $nacked = false;    // 消息是否被 Broker 拒绝
         try {
             // 每次发消息都新建一个 channel, 避免覆盖回调函数问题：Server ack'ed unknown delivery_tag "2"
-            $this->channel = $this->connection->channel();
+//            $this->channel = $this->connection->channel();
             // 如果启用发布确认
             if ($confirm) {
                 $this->channel->confirm_select(); // 开启发布确认模式
