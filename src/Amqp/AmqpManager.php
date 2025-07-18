@@ -254,22 +254,10 @@ class AmqpManager
         $confirmed = false; // 消息是否被 Broker 确认
         $nacked = false;    // 消息是否被 Broker 拒绝
         try {
-            // 每次发消息都新建一个 channel, 避免覆盖回调函数问题：Server ack'ed unknown delivery_tag "2"
-//            $this->channel = $this->connection->channel();
+            $confirm = false; // 默认关闭发布确认
             // 如果启用发布确认
             if ($confirm) {
                 $this->channel->confirm_select(); // 开启发布确认模式
-                // 设置 ack 处理器：当消息被 Broker 确认时调用
-                $this->channel->set_ack_handler(function (AMQPMessage $message) use (&$confirmed) {
-                    Log::debug("[Ack received for delivery]", [
-                        'exchange' => $message->getExchange(),
-                        'delivery_tag' => $message->getDeliveryTag(),
-                        'body' => $message->getBody(),
-                    ]);
-                    // 执行后清空监听器, 防止重复执行
-                    $this->channel->set_ack_handler(fn() => null);
-                    $confirmed = true;
-                });
                 // 设置 nack 处理器：当消息被 Broker 拒绝时调用（例如：队列不存在，消息路由失败等）
                 $this->channel->set_nack_handler(function (AMQPMessage $message) use (&$nacked) {
                     Log::error("[Nack received for delivery]", [
