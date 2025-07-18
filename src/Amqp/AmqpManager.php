@@ -374,7 +374,7 @@ class AmqpManager
             $this->switchExchangeQueueCache($exception);
             $this->shutdown();
             Log::error('消费者异常退出进程' . $exception->getMessage());
-            exit(0); // 异常退出进程, 退出码 0，可用于supervisor重启
+            exit(1); // 异常退出进程, 退出码 1，可用于supervisor重启
         }
     }
 
