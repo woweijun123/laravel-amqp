@@ -16,7 +16,8 @@ use Riven\Amqp\Annotation\Callee;
 use Riven\Amqp\Annotation\Consumer;
 use Riven\Amqp\Annotation\Impl;
 use Riven\Amqp\Annotation\Producer;
-use Riven\Amqp\Commands\InitializeAmqpCommand;
+use Riven\Amqp\Commands\ConsumeCommand;
+use Riven\Amqp\Commands\InitCommand;
 use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Exception\MessageException;
 use Riven\Amqp\Invoke\CalleeCollector;
@@ -95,7 +96,7 @@ class AmqpProvider extends ServiceProvider
         $amqpManager = new AmqpManager($bindings['producers'] ?? [], $bindings['consumers'] ?? []);
         // 注册 Artisan 命令
         if ($this->app->runningInConsole()) {
-            $this->commands([InitializeAmqpCommand::class]);
+            $this->commands([InitCommand::class, ConsumeCommand::class]);
         }
         register_shutdown_function([$amqpManager, 'shutdown']);
         $this->app->singletonIf(AmqpManager::class, function () use ($amqpManager) {
