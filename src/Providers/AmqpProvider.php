@@ -17,6 +17,7 @@ use Riven\Amqp\Annotation\Consumer;
 use Riven\Amqp\Annotation\Impl;
 use Riven\Amqp\Annotation\Producer;
 use Riven\Amqp\Enum\AmqpRedisKey;
+use Riven\Amqp\Exception\MessageException;
 use Riven\Amqp\Invoke\CalleeCollector;
 use Riven\Amqp\Invoke\Reflection;
 use Throwable;
@@ -84,17 +85,16 @@ class AmqpProvider extends ServiceProvider
      * 它会扫描指定目录下的PHP文件，查找带有 `App\Annotation\Consumer` 注解的类，
      * 并根据这些类的默认属性（如 queue, exchange, routingKey, type）配置AMQP消费者信息，
      * 最终将AMQP连接、通道和管理器绑定到服务容器中。
-     * @throws Exception
+     * @throws Throwable
+     * @throws MessageException
      */
     protected function registerAmqp(): void
     {
         // 从缓存或通过扫描发现 AMQP 绑定
         $bindings = $this->getBindings(self::getType(AmqpRedisKey::Amqp), [$this, 'discoverAmqp']);
-        $this->app->singleton(AmqpManager::class, function () use ($bindings) {
-            $amqpManager = new AmqpManager($bindings['producers'], $bindings['consumers']);
-            register_shutdown_function([$amqpManager, 'shutdown']);
-            return $amqpManager;
-        });
+        $amqpManager = new AmqpManager($bindings['producers'] ?? [], $bindings['consumers'] ?? []);
+        register_shutdown_function([$amqpManager, 'shutdown']);
+        $this->app->singletonIf(AmqpManager::class, $amqpManager);
     }
 
     /**

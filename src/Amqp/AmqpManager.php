@@ -12,7 +12,6 @@ use PhpAmqpLib\Message\AMQPMessage;
 use Riven\Amqp\Builder\ExchangeBuilder;
 use Riven\Amqp\Builder\QueueBuilder;
 use Riven\Amqp\Enum\AmqpRedisKey;
-use Riven\Amqp\Exception\MessageException;
 use Riven\Amqp\Message\ConsumerMessageInterface;
 use Riven\Amqp\Message\MessageInterface;
 use Riven\Amqp\Message\ProducerMessageInterface;
@@ -26,49 +25,40 @@ class AmqpManager
     private int $cacheTime = 3600; // 缓存时间「秒」
     private array $declaredExchanges = []; // 交换机缓存
     private array $declaredQueues = []; // 队列缓存
-    private ?string $currentConnectionType = null; // 当前连接类型
+    private bool $init = false; // 是否初始化
 
     /**
      * @param array $producers 生产者实例数组，键为交换机名，值为 ProducerMessageInterface 实例
      * @param array $consumers 消费者实例数组，键为队列名，值为 ConsumerMessageInterface 实例
-     * @throws MessageException
      * @throws Throwable
      */
     public function __construct(public array $producers, public array $consumers)
     {
-        $this->init();
     }
 
     /**
      * 初始化 AMQP 连接和通道。
-     * @param string $type
      * @param ConsumerMessageInterface|null $consumerMessage
-     * @return void
+     * @return AmqpManager
      * @throws Exception
      */
-    private function connect(string $type = '', ConsumerMessageInterface $consumerMessage = null): void
+    public function connect(ConsumerMessageInterface $consumerMessage = null): self
     {
+        // 如果已经连接，则直接返回
         if (isset($this->connection) && $this->connection->isConnected()) {
-            // 如果当前连接类型与请求类型一致，则直接返回现有连接
-            if ($this->currentConnectionType === $type) {
-                return;
-            }
-            $this->shutdown();
+            return $this;
         }
         // 从配置文件中获取AMQP连接配置
         $config = config('amqp');
-        if ($type == 'consumer') {
-            $config = array_merge($config, config('amqp.consumer'));
-        }
-        $readWriteTimeout = $config['read_write_timeout'];
-        $heartbeat = $config['heartbeat'];
         // 如果当前消费者实例设置了读写超时，则覆盖全局配置
         if ($consumerMessage instanceof ConsumerMessageInterface) {
+            // 获取消费者实例的读写超时和心跳间隔「若没有单独配置则取默认消费者配置」
+            $config = array_merge($config, config('amqp.consumer'));
             if (is_numeric($consumerMessage->readWriteTimeout())) {
-                $readWriteTimeout = $consumerMessage->readWriteTimeout();
+                $config['read_write_timeout'] = $consumerMessage->readWriteTimeout();
             }
             if (is_numeric($consumerMessage->heartbeat())) {
-                $heartbeat = $consumerMessage->heartbeat();
+                $config['heartbeat'] = $consumerMessage->heartbeat();
             }
         }
         // 建立新连接
@@ -83,26 +73,27 @@ class AmqpManager
             null, // 客户端属性数组，可用于发送自定义连接属性给 Broker
             'en_US', // Locale，语言/地区设置
             $config['connection_timeout'], // TCP 连接超时时间（秒）
-            $readWriteTimeout, // 读写操作超时时间（秒）
+            $config['read_write_timeout'], // 读写操作超时时间（秒）
             null, // 回调函数，用于处理连接异常（不常用）
             $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
-            $heartbeat // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
+            $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
         );
         // 创建 AMQP 通道
         $this->channel = $this->connection->channel();
-        // 记录当前连接类型
-        $this->currentConnectionType = $type;
+        return $this;
     }
 
     /**
      * 初始化 AMQP 连接和通道，并声明交换机和队列。
-     * @return void
-     * @throws MessageException
+     * @return AmqpManager
      * @throws Throwable
      */
-    protected function init(): void
+    public function init(): self
     {
-        // 创建 AMQP 链接
+        if ($this->init) {
+            return $this;
+        }
+        // 创建 AMQP 连接
         $this->connect();
         /* @var ProducerMessageInterface $producer */
         foreach ($this->producers as $producer) {
@@ -125,6 +116,8 @@ class AmqpManager
             // 声明队列并绑定交换机
             $this->declareQueue($consumer);
         }
+        $this->init = true; // 初始化完成
+        return $this;
     }
 
     /**
@@ -327,7 +320,7 @@ class AmqpManager
             /* @var ConsumerMessageInterface $consumer */
             $consumer = app($this->consumers[$queueName]);
             // 连接
-            $this->connect('consumer', $consumer);
+            $this->connect($consumer);
             // 设置 QoS 「Quality of Service」 预取数量
             if (is_array($qos = $consumer->getQos())) {
                 $size = $qos['prefetch_size'] ?? 0; // 预取消息的最大字节数（0 表示不限制）
@@ -356,7 +349,6 @@ class AmqpManager
             }
         } catch (Throwable $exception) {
             $this->switchExchangeQueueCache($exception);
-            $this->shutdown();
             Log::error("消费者异常退出进程($queueName)" . $exception->getMessage());
         }
         exit(1); // 异常退出进程, 退出码 1，可用于supervisor重启
@@ -368,7 +360,7 @@ class AmqpManager
      * @param AMQPMessage $message 收到的 AMQP 消息
      * @return void
      */
-    protected function handleCallback(ConsumerMessageInterface $consumerMessage, AMQPMessage $message)
+    protected function handleCallback(ConsumerMessageInterface $consumerMessage, AMQPMessage $message): void
     {
         $channel = $message->getChannel();
         $deliveryTag = $message->getDeliveryTag(); // 消息的投递标签，用于确认/拒绝
@@ -450,18 +442,27 @@ class AmqpManager
      * 关闭 AMQP 连接和通道，用于 `register_shutdown_function`。
      * 这个方法通常会在脚本结束时被调用，以确保资源被正确释放。
      * @return void
-     * @throws Exception
      */
     public function shutdown(): void
     {
+        Log::debug("关闭 AMQP 连接和通道 开始");
         // 如果通道存在且处于打开状态，则关闭
         if ($this->channel->is_open()) {
-            $this->channel->close();
+            try {
+                $this->channel->close();
+            } catch (Throwable $e) {
+                Log::error("关闭 AMQP 通道失败", ['exception' => $e]);
+            }
         }
         // 如果连接存在且处于连接状态，则关闭
         if ($this->connection->isConnected()) {
-            $this->connection->close();
+            try {
+                $this->connection->close();
+            } catch (Throwable $e) {
+                Log::error("关闭 AMQP 连接失败", ['exception' => $e]);
+            }
         }
+        Log::debug("关闭 AMQP 连接和通道 结束");
     }
 
     /**

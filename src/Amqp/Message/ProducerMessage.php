@@ -151,7 +151,7 @@ abstract class ProducerMessage extends Message implements ProducerMessageInterfa
         try {
             /* @var AmqpManager $amqpManager 通过 AmqpManager 发送消息 */
             $amqpManager = app(AmqpManager::class);
-            $result = $amqpManager->produce($producerMessage, $confirm, $timeout);
+            $result = $amqpManager->connect()->produce($producerMessage, $confirm, $timeout);
 
             // 记录生产者发送日志
             Log::info('producer success ', [
