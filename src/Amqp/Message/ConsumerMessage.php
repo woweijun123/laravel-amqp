@@ -45,55 +45,55 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
      * 获取消费者标签「Consumer Tag」, 在 AMQP 中用于唯一标识一个消费者
      * @var null|string
      */
-    protected ?string $consumerTag = null;
+    protected $consumerTag = null;
 
     /**
      * 是否接收发布者自己发布的消息
      * @var bool
      */
-    protected bool $noLocal = false;
+    protected $noLocal = false;
 
     /**
      * 手动消息确认（false 表示需要手动 ack/nack）
      * @var bool
      */
-    protected bool $noAck = false;
+    protected $noAck = false;
 
     /**
      * 队列独占（false 表示队列可以被多个消费者同时访问）
      * @var bool
      */
-    protected bool $exclusive = false;
+    protected $exclusive = false;
 
     /**
      * 队列独占（false 表示队列可以被多个消费者同时访问）
      * @var bool
      */
-    protected bool $nowait = false;
+    protected $nowait = false;
 
     /**
      * 队列参数
      * @var array
      */
-    protected array $arguments = [];
+    protected $arguments = [];
 
     /**
      * 队列票据
-     * @var int|null
+     * @var null
      */
-    protected ?int $ticket = null;
+    protected $ticket = null;
 
     /**
      * 读写超时
-     * @var int|null
+     * @var null
      */
-    protected ?int $readWriteTimeout = null;
+    protected $readWriteTimeout = null;
 
     /**
      * 心跳间隔
-     * @var int|null
+     * @var null
      */
-    protected ?int $heartbeat = null;
+    protected $heartbeat = null;
 
     /**
      * 消息处理失败时重试次数
