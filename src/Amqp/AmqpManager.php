@@ -449,16 +449,18 @@ class AmqpManager
         if (isset($this->channel) && $this->channel->is_open()) {
             try {
                 $this->channel->close();
+                Log::debug("关闭 AMQP 通道 成功");
             } catch (Throwable $e) {
-                Log::error("关闭 AMQP 通道失败", ['exception' => $e]);
+                Log::error("关闭 AMQP 通道 失败", ['exception' => $e]);
             }
         }
         // 如果连接存在且处于连接状态，则关闭
         if (isset($this->channel) && $this->connection->isConnected()) {
             try {
                 $this->connection->close();
+                Log::debug("关闭 AMQP 连接 成功");
             } catch (Throwable $e) {
-                Log::error("关闭 AMQP 连接失败", ['exception' => $e]);
+                Log::error("关闭 AMQP 连接 失败", ['exception' => $e]);
             }
         }
         Log::debug("关闭 AMQP 连接和通道 结束");
