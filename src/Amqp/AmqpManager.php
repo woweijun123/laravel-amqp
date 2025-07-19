@@ -30,7 +30,6 @@ class AmqpManager
     /**
      * @param array $producers 生产者实例数组，键为交换机名，值为 ProducerMessageInterface 实例
      * @param array $consumers 消费者实例数组，键为队列名，值为 ConsumerMessageInterface 实例
-     * @throws Throwable
      */
     public function __construct(public array $producers, public array $consumers)
     {

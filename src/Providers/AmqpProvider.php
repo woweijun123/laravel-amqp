@@ -16,6 +16,7 @@ use Riven\Amqp\Annotation\Callee;
 use Riven\Amqp\Annotation\Consumer;
 use Riven\Amqp\Annotation\Impl;
 use Riven\Amqp\Annotation\Producer;
+use Riven\Amqp\Commands\InitializeAmqpCommand;
 use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Exception\MessageException;
 use Riven\Amqp\Invoke\CalleeCollector;
@@ -34,7 +35,8 @@ class AmqpProvider extends ServiceProvider
     /**
      * 启动服务提供者
      * 在这个方法中注册各种通过注解发现的服务、回调和AMQP消费者。
-     * @throws Exception
+     * @throws MessageException
+     * @throws Throwable
      */
     public function boot(): void
     {
@@ -85,14 +87,16 @@ class AmqpProvider extends ServiceProvider
      * 它会扫描指定目录下的PHP文件，查找带有 `App\Annotation\Consumer` 注解的类，
      * 并根据这些类的默认属性（如 queue, exchange, routingKey, type）配置AMQP消费者信息，
      * 最终将AMQP连接、通道和管理器绑定到服务容器中。
-     * @throws Throwable
-     * @throws MessageException
      */
     protected function registerAmqp(): void
     {
         // 从缓存或通过扫描发现 AMQP 绑定
         $bindings = $this->getBindings(self::getType(AmqpRedisKey::Amqp), [$this, 'discoverAmqp']);
         $amqpManager = new AmqpManager($bindings['producers'] ?? [], $bindings['consumers'] ?? []);
+        // 注册 Artisan 命令
+        if ($this->app->runningInConsole()) {
+            $this->commands([InitializeAmqpCommand::class]);
+        }
         register_shutdown_function([$amqpManager, 'shutdown']);
         $this->app->singletonIf(AmqpManager::class, function () use ($amqpManager) {
             return $amqpManager;
