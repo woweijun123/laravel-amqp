@@ -94,7 +94,9 @@ class AmqpProvider extends ServiceProvider
         $bindings = $this->getBindings(self::getType(AmqpRedisKey::Amqp), [$this, 'discoverAmqp']);
         $amqpManager = new AmqpManager($bindings['producers'] ?? [], $bindings['consumers'] ?? []);
         register_shutdown_function([$amqpManager, 'shutdown']);
-        $this->app->singletonIf(AmqpManager::class, $amqpManager);
+        $this->app->singletonIf(AmqpManager::class, function () use ($amqpManager) {
+            return $amqpManager;
+        });
     }
 
     /**

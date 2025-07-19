@@ -447,7 +447,7 @@ class AmqpManager
     {
         Log::debug("关闭 AMQP 连接和通道 开始");
         // 如果通道存在且处于打开状态，则关闭
-        if ($this->channel->is_open()) {
+        if (isset($this->channel) && $this->channel->is_open()) {
             try {
                 $this->channel->close();
             } catch (Throwable $e) {
@@ -455,7 +455,7 @@ class AmqpManager
             }
         }
         // 如果连接存在且处于连接状态，则关闭
-        if ($this->connection->isConnected()) {
+        if (isset($this->channel) && $this->connection->isConnected()) {
             try {
                 $this->connection->close();
             } catch (Throwable $e) {
