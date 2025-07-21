@@ -426,20 +426,16 @@ class AmqpManager
         // 根据消费结果进行不同的处理
         switch ($result) {
             case Result::ACK:
-                Log::info($deliveryTag . ' acked.');
                 app(AmqpRetry::class)->clearRetryCount($messageId); // 从 Redis 删除重试计数
                 $channel->basic_ack($deliveryTag); // 确认消息已成功处理
                 break;
             case Result::NACK:
-                Log::info($deliveryTag . ' uacked.');
                 $channel->basic_nack($deliveryTag, false, $consumerMessage->isRequeue());
                 break;
             case Result::REQUEUE:
-                Log::info($deliveryTag . ' requeued.');
                 $channel->basic_reject($deliveryTag, $consumerMessage->isRequeue());
                 break;
             default:
-                Log::info($deliveryTag . ' rejected.');
                 $channel->basic_reject($deliveryTag, false); // 拒绝消息，不重新入队
                 break;
         }
@@ -452,12 +448,10 @@ class AmqpManager
      */
     public function shutdown(): void
     {
-        Log::info("关闭 AMQP 连接和通道 开始");
         // 如果通道存在且处于打开状态，则关闭
         if (isset($this->channel) && $this->channel->is_open()) {
             try {
                 $this->channel->close();
-                Log::info("关闭 AMQP 通道 成功");
             } catch (Throwable $e) {
                 Log::error("关闭 AMQP 通道 失败", ['exception' => $e]);
             }
@@ -466,12 +460,10 @@ class AmqpManager
         if (isset($this->channel) && $this->connection->isConnected()) {
             try {
                 $this->connection->close();
-                Log::info("关闭 AMQP 连接 成功");
             } catch (Throwable $e) {
                 Log::error("关闭 AMQP 连接 失败", ['exception' => $e]);
             }
         }
-        Log::info("关闭 AMQP 连接和通道 结束");
     }
 
     /**
