@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Riven\Amqp\Message;
 
-use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Riven\Amqp\Builder\QueueBuilder;
 use Riven\Amqp\Result;
 use PhpAmqpLib\Message\AMQPMessage;
@@ -24,7 +23,7 @@ interface ConsumerMessageInterface extends MessageInterface
      * @param AMQPMessage $message 原始的 AMQP 消息对象
      * @return Result 消费结果（如：ACK, NACK, REJECT）
      */
-    public function consumeMessage(mixed $data, AMQPMessage $message, AMQPStreamConnection $connection): Result;
+    public function consumeMessage(mixed $data, AMQPMessage $message): Result;
 
     /**
      * 设置队列名称。
