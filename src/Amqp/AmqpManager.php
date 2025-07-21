@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Redis;
 use InvalidArgumentException;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
+use PhpAmqpLib\Exception\AMQPIOException;
 use PhpAmqpLib\Message\AMQPMessage;
 use Riven\Amqp\Builder\ExchangeBuilder;
 use Riven\Amqp\Builder\QueueBuilder;
@@ -26,6 +27,7 @@ class AmqpManager
     private array $declaredExchanges = []; // 交换机缓存
     private array $declaredQueues = []; // 队列缓存
     private bool $init = false; // 是否初始化
+    private int $keepalive = 10; // keepalive 时间「秒」
 
     /**
      * @param array $producers 生产者实例数组，键为交换机名，值为 ProducerMessageInterface 实例
@@ -364,6 +366,7 @@ class AmqpManager
         $channel = $message->getChannel();
         $deliveryTag = $message->getDeliveryTag(); // 消息的投递标签，用于确认/拒绝
         $messageId = $message->get('message_id'); // 获取消息 ID，用于追踪重试次数
+        Log::withContext(['message_id' => $messageId]);
 
         // 如果消息没有 message_id，无法追踪重试次数，直接拒绝（不重新入队）
         if (empty($messageId)) {
@@ -376,15 +379,20 @@ class AmqpManager
             return;
         }
         try {
+            // 保持心跳
+            $this->keepalive();
             // 执行消费逻辑
-            $data = $consumerMessage->unserialize($message->getBody()); // 反序列化消息体
-            Log::withContext(['message_id' => $messageId]);
-            Log::debug(
-                "------- {$consumerMessage->getQueue()} start -------",
+            Log::info(
+                "--- {$consumerMessage->getQueue()} start ---",
                 ['delivery_tag' => $deliveryTag, 'body' => $message->getBody(), 'queue' => $consumerMessage->getQueue()]
             );
-            $result = $consumerMessage->consumeMessage($data, $message); // 调用消费者定义的实际业务处理方法
-            Log::debug("------- {$consumerMessage->getQueue()} end -------", ['result' => $result]);
+            // 调用消费者定义的实际业务处理方法
+            $result = $consumerMessage->consumeMessage(
+                // 反序列化消息体
+                $consumerMessage->unserialize($message->getBody()),
+                $message
+            );
+            Log::info("--- {$consumerMessage->getQueue()} end ---", ['result' => $result]);
         } catch (Throwable $e) {
             // 捕获消费过程中发生的异常，记录错误日志
             Log::error("消费异常" . $e->getMessage(), [
@@ -418,20 +426,20 @@ class AmqpManager
         // 根据消费结果进行不同的处理
         switch ($result) {
             case Result::ACK:
-                Log::debug($deliveryTag . ' acked.');
+                Log::info($deliveryTag . ' acked.');
                 app(AmqpRetry::class)->clearRetryCount($messageId); // 从 Redis 删除重试计数
                 $channel->basic_ack($deliveryTag); // 确认消息已成功处理
                 break;
             case Result::NACK:
-                Log::debug($deliveryTag . ' uacked.');
+                Log::info($deliveryTag . ' uacked.');
                 $channel->basic_nack($deliveryTag, false, $consumerMessage->isRequeue());
                 break;
             case Result::REQUEUE:
-                Log::debug($deliveryTag . ' requeued.');
+                Log::info($deliveryTag . ' requeued.');
                 $channel->basic_reject($deliveryTag, $consumerMessage->isRequeue());
                 break;
             default:
-                Log::debug($deliveryTag . ' rejected.');
+                Log::info($deliveryTag . ' rejected.');
                 $channel->basic_reject($deliveryTag, false); // 拒绝消息，不重新入队
                 break;
         }
@@ -444,12 +452,12 @@ class AmqpManager
      */
     public function shutdown(): void
     {
-        Log::debug("关闭 AMQP 连接和通道 开始");
+        Log::info("关闭 AMQP 连接和通道 开始");
         // 如果通道存在且处于打开状态，则关闭
         if (isset($this->channel) && $this->channel->is_open()) {
             try {
                 $this->channel->close();
-                Log::debug("关闭 AMQP 通道 成功");
+                Log::info("关闭 AMQP 通道 成功");
             } catch (Throwable $e) {
                 Log::error("关闭 AMQP 通道 失败", ['exception' => $e]);
             }
@@ -458,12 +466,12 @@ class AmqpManager
         if (isset($this->channel) && $this->connection->isConnected()) {
             try {
                 $this->connection->close();
-                Log::debug("关闭 AMQP 连接 成功");
+                Log::info("关闭 AMQP 连接 成功");
             } catch (Throwable $e) {
                 Log::error("关闭 AMQP 连接 失败", ['exception' => $e]);
             }
         }
-        Log::debug("关闭 AMQP 连接和通道 结束");
+        Log::info("关闭 AMQP 连接和通道 结束");
     }
 
     /**
@@ -487,6 +495,21 @@ class AmqpManager
                 $this->setQueueCache($queueName, 0);
             }
         }
+    }
+
+    /**
+     * 保持心跳
+     * @return void
+     * @throws AMQPIOException
+     */
+    public function keepalive(): void
+    {
+        pcntl_async_signals(true);
+        pcntl_signal(SIGALRM, function () {
+            $this->connection->checkHeartBeat(); // 手动触发心跳响应
+            pcntl_alarm($this->keepalive);
+        });
+        pcntl_alarm($this->keepalive);
     }
 
     /**
