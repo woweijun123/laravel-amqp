@@ -383,7 +383,7 @@ class AmqpManager
                 "------- {$consumerMessage->getQueue()} start -------",
                 ['delivery_tag' => $deliveryTag, 'body' => $message->getBody(), 'queue' => $consumerMessage->getQueue()]
             );
-            $result = $consumerMessage->consumeMessage($data, $message); // 调用消费者定义的实际业务处理方法
+            $result = $consumerMessage->consumeMessage($data, $message, $this->connection); // 调用消费者定义的实际业务处理方法
             Log::debug("------- {$consumerMessage->getQueue()} end -------", ['result' => $result]);
         } catch (Throwable $e) {
             // 捕获消费过程中发生的异常，记录错误日志
