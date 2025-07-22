@@ -41,12 +41,9 @@ php artisan vendor:publish --provider="Riven\Providers\AmqpProvider"
 ```
 
 ## 用法
-
 以下示例展示了主要的使用模式：
 
-
 ### 步骤1：定义生产者和消费者
-
 生产者
 ```php
 <?php
@@ -153,7 +150,13 @@ class CommonConsumer extends ConsumerMessage
 }
 ```
 
-### 步骤2：生产者发送消息
+### 步骤2：初始化交换机、队列、绑定关系
+>只需初始化一次，后续不用重复操作。
+```bash
+php artisan amqp:init
+```
+
+### 步骤3：生产者发送消息
 ```php
 // 发布普通消息
 CommonProducer::send(['order_id' => 123]);
@@ -161,7 +164,7 @@ CommonProducer::send(['order_id' => 123]);
 CommonProducer::send(['order_id' => 123], delayTime: 2);
 ```
 
-### 步骤3：启动消费者进程消费
+### 步骤4：启动消费者进程消费
 ```php
 # 示例
 php artisan amqp:consume xxx 「xxx填写为具体对应的队列名称」
