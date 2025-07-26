@@ -243,7 +243,7 @@ class AmqpProvider extends ServiceProvider
         // 如果缓存不存在或读取失败，则通过回调函数发现绑定
         $bindings = $discoverCallback();
 
-        // 将发现的绑定结果永久存入缓存
+        // 将发现的绑定结果存入缓存
         $this->getCache()->put($type, $bindings, $this->cacheTime);
         return $bindings;
     }

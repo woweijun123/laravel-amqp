@@ -22,9 +22,10 @@ class InitCommand extends Command
 
     #[NoReturn] public function handle(): void
     {
-        dump(Cache::forget(AmqpRedisKey::Impl->spr(env('APP_NAME'))));
-        dump(Cache::forget(AmqpRedisKey::Callee->spr(env('APP_NAME'))));
-        dump(Cache::forget(AmqpRedisKey::Amqp->spr(env('APP_NAME'))));
+        $appName = env('APP_NAME');
+        dump(Cache::forget(AmqpRedisKey::Impl->spr($appName)));
+        dump(Cache::forget(AmqpRedisKey::Callee->spr($appName)));
+        dump(Cache::forget(AmqpRedisKey::Amqp->spr($appName)));
         dump(Redis::del(AmqpRedisKey::AmqpDeclaredExchange->value));
         dump(Redis::del(AmqpRedisKey::AmqpDeclaredQueue->value));
         $this->info('AMQP 清除缓存 成功');
