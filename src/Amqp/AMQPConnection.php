@@ -98,7 +98,7 @@ class AMQPConnection extends AMQPStreamConnection
     public function heartbeat(): void
     {
         if (isset($this->heartbeat) && $this->heartbeat > 0) {
-            $heartbeat = ceil($this->heartbeat / 2);
+            $heartbeat = ceil($this->heartbeat / 4);
             pcntl_async_signals(true);
             pcntl_signal(SIGALRM, function () use ($heartbeat) {
                 $this->checkHeartBeat(); // 手动触发心跳响应
