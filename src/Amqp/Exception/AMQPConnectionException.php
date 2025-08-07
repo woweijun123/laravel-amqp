@@ -6,6 +6,6 @@ namespace Riven\Amqp\Exception;
 
 use Exception;
 
-class ChannelException extends Exception
+class AMQPConnectionException extends Exception
 {
 }

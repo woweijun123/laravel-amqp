@@ -2,13 +2,10 @@
 
 namespace Riven\Amqp;
 
-use Exception;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use InvalidArgumentException;
 use PhpAmqpLib\Channel\AMQPChannel;
-use PhpAmqpLib\Connection\AMQPStreamConnection;
-use PhpAmqpLib\Exception\AMQPIOException;
 use PhpAmqpLib\Message\AMQPMessage;
 use Riven\Amqp\Builder\ExchangeBuilder;
 use Riven\Amqp\Builder\QueueBuilder;
@@ -21,61 +18,17 @@ use Throwable;
 
 class AmqpManager
 {
-    private AMQPStreamConnection $connection; // AMQP 链接
-    private AMQPChannel $channel; // AMQP 通道
-    private AMQPChannel $confirmChannel; // AMQP 通道「发布确认」
     private int $cacheTime = 3600; // 缓存时间「秒」
     private array $declaredExchanges = []; // 交换机缓存
     private array $declaredQueues = []; // 队列缓存
     private bool $init = false; // 是否初始化
-    private int $keepalive = 10; // keepalive 时间「秒」
 
     /**
-     * @param array $producers 生产者实例数组，键为交换机名，值为 ProducerMessageInterface 实例
-     * @param array $consumers 消费者实例数组，键为队列名，值为 ConsumerMessageInterface 实例
+     * @param array $producers 生产者实例数组，键为交换机名，值为 ProducerMessageInterface 实例路径
+     * @param array $consumers 消费者实例数组，键为队列名，值为 ConsumerMessageInterface 实例路径
      */
     public function __construct(public array $producers, public array $consumers)
     {
-    }
-
-    /**
-     * 初始化 AMQP 连接和通道。
-     * @param ConsumerMessageInterface|null $consumerMessage
-     * @return AmqpManager
-     * @throws Exception
-     */
-    public function connect(ConsumerMessageInterface $consumerMessage = null): self
-    {
-        // 如果已经连接，则直接返回
-        if (isset($this->connection) && $this->connection->isConnected()) {
-            return $this;
-        }
-        // 从配置文件中获取AMQP连接配置
-        $config = config('amqp');
-        // 如果当前消费者实例设置了读写超时，则覆盖全局配置
-        if ($consumerMessage instanceof ConsumerMessageInterface) {
-            $config = array_merge($config, config('amqp.consumer'));
-        }
-        // 建立新连接
-        $this->connection = new AMQPStreamConnection(
-            $config['host'], // RabbitMQ 服务器地址
-            $config['port'], // RabbitMQ 端口，默认为 5672
-            $config['user'], // 连接用户名
-            $config['password'], // 连接密码
-            $config['vhost'], // 虚拟主机（Virtual Host），默认为 '/'
-            false, // 是否开启 insist 模式。如果为 true，客户端会在连接失败时尝试重连（通常不推荐在构造函数直接设置）
-            'AMQPLAIN', // 认证机制，默认为 'AMQPLAIN'
-            null, // 客户端属性数组，可用于发送自定义连接属性给 Broker
-            'en_US', // Locale，语言/地区设置
-            $config['connection_timeout'], // TCP 连接超时时间（秒）
-            $config['read_write_timeout'], // 读写操作超时时间（秒）
-            null, // 回调函数，用于处理连接异常（不常用）
-            $config['keepalive'], // TCP Keepalive 模式是否开启（true/false），用于维护 TCP 连接活力
-            $config['heartbeat'] // 心跳间隔（秒）。客户端和服务器之间定期发送心跳帧，用于检测死连接。
-        );
-        // 创建 AMQP 通道
-        $this->channel = $this->connection->channel();
-        return $this;
     }
 
     /**
@@ -89,7 +42,8 @@ class AmqpManager
             return $this;
         }
         // 创建 AMQP 连接
-        $this->connect();
+        $connection = AMQPConnection::getInstance();
+        $channel = $connection->getChannel();
         /* @var ProducerMessageInterface $producer */
         foreach ($this->producers as $producer) {
             $producer = app($producer);
@@ -98,7 +52,7 @@ class AmqpManager
                 continue;
             }
             // 声明交换机
-            $this->declareExchange($producer);
+            $this->declareExchange($producer, $channel);
         }
         /* @var ConsumerMessageInterface $consumer */
         // 遍历所有队列配置，初始化交换机和消费者实例
@@ -109,7 +63,7 @@ class AmqpManager
                 continue;
             }
             // 声明队列并绑定交换机
-            $this->declareQueue($consumer);
+            $this->declareQueue($consumer, $channel);
         }
         $this->init = true; // 初始化完成
         return $this;
@@ -134,10 +88,11 @@ class AmqpManager
     /**
      * 声明交换机
      * @param MessageInterface $message
+     * @param AMQPChannel $channel
      * @return bool
      * @throws Throwable
      */
-    protected function declareExchange(MessageInterface $message): bool
+    protected function declareExchange(MessageInterface $message, AMQPChannel $channel): bool
     {
         $builder = $message->getExchangeBuilder();
         if ($this->exchangeExists($builder)) {
@@ -145,7 +100,7 @@ class AmqpManager
         }
         try {
             Log::info("交换机 [{$builder->getExchange()}] 不存在 申明中...");
-            $this->channel->exchange_declare(
+            $channel->exchange_declare(
                 $builder->getExchange(),    // 交换机名称
                 $builder->getType(),        // 交换机类型 (direct, fanout, topic, headers)
                 $builder->isPassive(),      // 是否被动声明「true: 如果交换机不存在，会抛出异常。 false: 如果不存在，就创建它。」
@@ -187,10 +142,11 @@ class AmqpManager
      * 声明队列并绑定交换机。
      * 支持声明死信队列 (DLQ) 和消息 TTL。
      * @param ConsumerMessageInterface $message
+     * @param AMQPChannel $channel
      * @return bool
      * @throws Throwable
      */
-    protected function declareQueue(ConsumerMessageInterface $message): bool
+    protected function declareQueue(ConsumerMessageInterface $message, AMQPChannel $channel): bool
     {
         $builder = $message->getQueueBuilder();
         if ($this->queueExists($builder)) {
@@ -198,7 +154,7 @@ class AmqpManager
         }
         try {
             Log::info("队列 [{$builder->getQueue()}] 不存在 申明中...");
-            $this->channel->queue_declare(
+            $channel->queue_declare(
                 $builder->getQueue(), // 队列名称
                 $builder->isPassive(), // 是否被动声明（只检查队列是否存在，不创建）
                 $builder->isDurable(), // 是否持久化（RabbitMQ 重启后队列不消失）
@@ -214,12 +170,12 @@ class AmqpManager
             $routineKeys = (array)$message->getRoutingKey();
             foreach ($routineKeys as $routingKey) {
                 // 将队列绑定到交换机和路由键
-                $this->channel->queue_bind($message->getQueue(), $message->getExchange(), $routingKey);
+                $channel->queue_bind($message->getQueue(), $message->getExchange(), $routingKey);
             }
 
             // 如果路由键为空且交换机类型为 FANOUT，则不使用路由键进行绑定
             if (empty($routineKeys) && $message->getType() === Type::FANOUT) {
-                $this->channel->queue_bind($message->getQueue(), $message->getExchange());
+                $channel->queue_bind($message->getQueue(), $message->getExchange());
             }
             return true;
         } catch (Throwable $exception) {
@@ -242,14 +198,15 @@ class AmqpManager
      */
     public function produce(ProducerMessageInterface $producerMessage, bool $confirm = false, int $timeout = 5): bool
     {
-        $isSendSuccess = true; // 发送消息成功标志「不用发布确认，则假定发布成功」
         try {
+            $connection = AMQPConnection::getInstance();
+            $isSendSuccess = true; // 发送消息成功标志「不用发布确认，则假定发布成功」
             // 启用发布确认
             if ($confirm) {
-                $channel = $this->getConfirmChannel();
+                $channel = $connection->getConfirmChannel();
                 $isSendSuccess = $this->confirmCallback($producerMessage, $channel);
             } else {
-                $channel = $this->channel;
+                $channel = $connection->getChannel();
             }
             // 创建 AMQPMessage 实例
             $message = new AMQPMessage($producerMessage->payload(), $producerMessage->getProperties());
@@ -289,22 +246,20 @@ class AmqpManager
         try {
             /* @var ConsumerMessageInterface $consumer */
             $consumer = app($this->consumers[$queueName]);
-            // 连接
-            $this->connect($consumer);
+            $connection = AMQPConnection::getInstance(true);
+            $channel = $connection->getChannel();
             // 设置 QoS 「Quality of Service」 预取数量
             if (is_array($qos = $consumer->getQos())) {
                 $size = $qos['prefetch_size'] ?? 0; // 预取消息的最大字节数（0 表示不限制）
                 $count = $qos['prefetch_count'] ?? 1; // 消费者未确认消息的最大数量
                 $global = $qos['global'] ?? false; // 设置是否应用于整个通道（true）或仅当前消费者（false）
-                $this->channel->basic_qos($size, $count, $global);
+                $channel->basic_qos($size, $count, $global);
             }
             // 获取消费者最大消费消息数量
             $maxConsumption = $consumer->getMaxConsumption();
             $currentConsumption = 0;
-            // 保持心跳
-            $this->keepalive();
             // 注册基本消费者回调
-            $this->channel->basic_consume(
+            $channel->basic_consume(
                 $queueName, // 要消费的队列名称
                 $consumer->getConsumerTag(), // 消费者标签
                 $consumer->isNoLocal(), // no_local: 不接收发布者自己发布的消息（通常设置为 false）
@@ -319,8 +274,8 @@ class AmqpManager
                 $consumer->getArguments()
             );
             // 启动消费者监听循环, 持续等待消息，直到通道不再处于消费状态
-            while ($this->channel->is_consuming()) {
-                $this->channel->wait(); // 阻塞等待消息，处理 IO 事件
+            while ($channel->is_consuming()) {
+                $channel->wait(); // 阻塞等待消息，处理 IO 事件
                 // 消费数量达到限制，停止消费
                 if ($maxConsumption > 0 && ++$currentConsumption >= $maxConsumption) {
                     Log::info("消费者已消费 $currentConsumption 条消息，达到限制，停止消费");
@@ -419,28 +374,12 @@ class AmqpManager
     }
 
     /**
-     * 关闭 AMQP 连接和通道，用于 `register_shutdown_function`。
-     * 这个方法通常会在脚本结束时被调用，以确保资源被正确释放。
+     * 关闭 AMQP 连接和通道，用于 `register_shutdown_function` 在脚本结束时被调用，以确保资源被正确释放
      * @return void
      */
     public function shutdown(): void
     {
-        // 如果通道存在且处于打开状态，则关闭
-        if (isset($this->channel) && $this->channel->is_open()) {
-            try {
-                $this->channel->close();
-            } catch (Throwable $e) {
-                Log::error("关闭 AMQP 通道 失败", ['exception' => $e]);
-            }
-        }
-        // 如果连接存在且处于连接状态，则关闭
-        if (isset($this->channel) && $this->connection->isConnected()) {
-            try {
-                $this->connection->close();
-            } catch (Throwable $e) {
-                Log::error("关闭 AMQP 连接 失败", ['exception' => $e]);
-            }
-        }
+        AMQPConnection::shutdown();
     }
 
     /**
@@ -464,21 +403,6 @@ class AmqpManager
                 $this->setQueueCache($queueName, 0);
             }
         }
-    }
-
-    /**
-     * 保持心跳
-     * @return void
-     * @throws AMQPIOException
-     */
-    public function keepalive(): void
-    {
-        pcntl_async_signals(true);
-        pcntl_signal(SIGALRM, function () {
-            $this->connection->checkHeartBeat(); // 手动触发心跳响应
-            pcntl_alarm($this->keepalive);
-        });
-        pcntl_alarm($this->keepalive);
     }
 
     /**
@@ -555,19 +479,5 @@ class AmqpManager
             $isSendSuccess = false;
         });
         return $isSendSuccess;
-    }
-
-    /**
-     * 获取发布确认通道
-     * @return AMQPChannel
-     */
-    protected function getConfirmChannel(): AMQPChannel
-    {
-        if (isset($this->confirmChannel) && $this->confirmChannel->is_open()) {
-            return $this->confirmChannel;
-        }
-        $this->confirmChannel = $this->connection->channel();
-        $this->confirmChannel->confirm_select(); // 开启发布确认模式
-        return $this->confirmChannel;
     }
 }
