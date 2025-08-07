@@ -10,8 +10,4 @@ use Attribute;
 #[Attribute(Attribute::TARGET_CLASS)]
 class Impl
 {
-    public function __construct(
-    )
-    {
-    }
 }

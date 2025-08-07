@@ -23,6 +23,7 @@ class AmqpManager
 {
     private AMQPStreamConnection $connection; // AMQP 链接
     private AMQPChannel $channel; // AMQP 通道
+    private AMQPChannel $confirmChannel; // AMQP 通道「发布确认」
     private int $cacheTime = 3600; // 缓存时间「秒」
     private array $declaredExchanges = []; // 交换机缓存
     private array $declaredQueues = []; // 队列缓存
@@ -53,14 +54,7 @@ class AmqpManager
         $config = config('amqp');
         // 如果当前消费者实例设置了读写超时，则覆盖全局配置
         if ($consumerMessage instanceof ConsumerMessageInterface) {
-            // 获取消费者实例的读写超时和心跳间隔「若没有单独配置则取默认消费者配置」
             $config = array_merge($config, config('amqp.consumer'));
-            if (is_numeric($consumerMessage->readWriteTimeout())) {
-                $config['read_write_timeout'] = $consumerMessage->readWriteTimeout();
-            }
-            if (is_numeric($consumerMessage->heartbeat())) {
-                $config['heartbeat'] = $consumerMessage->heartbeat();
-            }
         }
         // 建立新连接
         $this->connection = new AMQPStreamConnection(
@@ -242,47 +236,25 @@ class AmqpManager
      * @param ProducerMessageInterface $producerMessage 生产者消息对象
      * @param bool $confirm 是否启用发布确认
      * @param int $timeout 发布确认的等待超时时间（秒）
-     * @return bool 消息是否成功发布并被Broker确认
+     * @return bool 消息是否发送成功
      * @throws InvalidArgumentException 如果交换机未在配置中找到
      * @throws Throwable 如果发布过程中发生错误
      */
     public function produce(ProducerMessageInterface $producerMessage, bool $confirm = false, int $timeout = 5): bool
     {
-        $confirmed = false; // 消息是否被 Broker 确认
-        $nacked = false;    // 消息是否被 Broker 拒绝
+        $isSendSuccess = true; // 发送消息成功标志「不用发布确认，则假定发布成功」
         try {
-            $confirm = false; // 默认关闭发布确认
-            // 如果启用发布确认
+            // 启用发布确认
             if ($confirm) {
-                $this->channel->confirm_select(); // 开启发布确认模式
-                // 设置 nack 处理器：当消息被 Broker 拒绝时调用（例如：队列不存在，消息路由失败等）
-                $this->channel->set_nack_handler(function (AMQPMessage $message) use (&$nacked) {
-                    Log::error("[Nack received for delivery]", [
-                        'exchange' => $message->getExchange(),
-                        'delivery_tag' => $message->getDeliveryTag(),
-                        'body' => $message->getBody(),
-                    ]);
-                    // 执行后清空监听器, 防止重复执行
-                    $this->channel->set_nack_handler(fn() => null);
-                    $nacked = true;
-                });
-                // 设置 Return 监听器，当消息无法路由且设置了 mandatory 标志时会触发
-                $this->channel->set_return_listener(function (
-                    int         $replyCode,
-                    string      $replyText,
-                    string      $exchange,
-                    string      $routingKey,
-                    AMQPMessage $message
-                ) use ($producerMessage) {
-                    $producerMessage->onMandatoryReturn($replyCode, $replyText, $exchange, $routingKey, $message);
-                    // 执行后清空监听器, 防止重复执行
-                    $this->channel->set_return_listener(fn() => null);
-                });
+                $channel = $this->getConfirmChannel();
+                $isSendSuccess = $this->confirmCallback($producerMessage, $channel);
+            } else {
+                $channel = $this->channel;
             }
             // 创建 AMQPMessage 实例
             $message = new AMQPMessage($producerMessage->payload(), $producerMessage->getProperties());
             // 发布消息
-            $this->channel->basic_publish(
+            $channel->basic_publish(
                 $message,
                 $producerMessage->getExchange(),    // 交换机名称
                 $producerMessage->getRoutingKey(),  // 路由键
@@ -291,10 +263,7 @@ class AmqpManager
             );
             // 等待发布确认结果
             if ($confirm) {
-                $this->channel->wait_for_pending_acks_returns($timeout); // 等待所有挂起的 ack/nack 确认或返回消息
-                $result = $confirmed && !$nacked; // 只有当消息被确认且未被拒绝时才算成功
-            } else {
-                $result = true; // 如果不使用确认模式，则假定发布成功
+                $channel->wait_for_pending_acks_returns($timeout); // 等待所有挂起的 ack/nack 确认或返回消息
             }
         } catch (Throwable $exception) {
             // 缓存交换机和队列不存在
@@ -302,7 +271,7 @@ class AmqpManager
             throw $exception;
         }
 
-        return $result;
+        return $isSendSuccess;
     }
 
     /**
@@ -329,6 +298,11 @@ class AmqpManager
                 $global = $qos['global'] ?? false; // 设置是否应用于整个通道（true）或仅当前消费者（false）
                 $this->channel->basic_qos($size, $count, $global);
             }
+            // 获取消费者最大消费消息数量
+            $maxConsumption = $consumer->getMaxConsumption();
+            $currentConsumption = 0;
+            // 保持心跳
+            $this->keepalive();
             // 注册基本消费者回调
             $this->channel->basic_consume(
                 $queueName, // 要消费的队列名称
@@ -347,6 +321,11 @@ class AmqpManager
             // 启动消费者监听循环, 持续等待消息，直到通道不再处于消费状态
             while ($this->channel->is_consuming()) {
                 $this->channel->wait(); // 阻塞等待消息，处理 IO 事件
+                // 消费数量达到限制，停止消费
+                if ($maxConsumption > 0 && ++$currentConsumption >= $maxConsumption) {
+                    Log::info("消费者已消费 $currentConsumption 条消息，达到限制，停止消费");
+                    break;
+                }
             }
         } catch (Throwable $exception) {
             $this->switchExchangeQueueCache($exception);
@@ -379,8 +358,6 @@ class AmqpManager
             return;
         }
         try {
-            // 保持心跳
-            $this->keepalive();
             // 执行消费逻辑
             Log::info(
                 "--- {$consumerMessage->getQueue()} start ---",
@@ -546,5 +523,51 @@ class AmqpManager
     protected function getQueueCache(string $queue): bool
     {
         return (bool)Redis::hGet(AmqpRedisKey::AmqpDeclaredQueue->value, $queue);
+    }
+
+    /**
+     * 发布确认回调
+     * @param ProducerMessageInterface $producerMessage
+     * @param AMQPChannel $channel
+     * @return bool
+     */
+    protected function confirmCallback(ProducerMessageInterface $producerMessage, AMQPChannel $channel): bool
+    {
+        $isSendSuccess = true;
+        // 设置 ack 处理器：当消息被 Broker 确认时调用
+        $channel->set_ack_handler(function (AMQPMessage $message) use ($producerMessage) {
+            $producerMessage->ackHandler($message);
+        });
+        // 设置 nack 处理器：当消息被 Broker 拒绝时调用（例如：队列不存在，消息路由失败等）
+        $channel->set_nack_handler(function (AMQPMessage $message) use (&$isSendSuccess, $producerMessage) {
+            $producerMessage->nackHandler($message);
+            $isSendSuccess = false;
+        });
+        // 设置 Return 监听器，当消息无法路由且设置了 mandatory 标志时会触发
+        $channel->set_return_listener(function (
+            int         $replyCode,
+            string      $replyText,
+            string      $exchange,
+            string      $routingKey,
+            AMQPMessage $message
+        ) use ($producerMessage, &$isSendSuccess) {
+            $producerMessage->basicReturnCallback($replyCode, $replyText, $exchange, $routingKey, $message);
+            $isSendSuccess = false;
+        });
+        return $isSendSuccess;
+    }
+
+    /**
+     * 获取发布确认通道
+     * @return AMQPChannel
+     */
+    protected function getConfirmChannel(): AMQPChannel
+    {
+        if (isset($this->confirmChannel) && $this->confirmChannel->is_open()) {
+            return $this->confirmChannel;
+        }
+        $this->confirmChannel = $this->connection->channel();
+        $this->confirmChannel->confirm_select(); // 开启发布确认模式
+        return $this->confirmChannel;
     }
 }

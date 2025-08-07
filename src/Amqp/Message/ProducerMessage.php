@@ -4,17 +4,17 @@ declare(strict_types=1);
 
 namespace Riven\Amqp\Message;
 
-use Riven\Amqp\Amqp;
-use Riven\Amqp\AmqpManager;
-use Riven\Amqp\Exception\MessageException;
-use Riven\Amqp\Packer\PhpSerializerPacker;
-use Riven\Amqp\Result;
-use Riven\Amqp\Invoke\CalleeEvent;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
+use Riven\Amqp\AmqpManager;
+use Riven\Amqp\Enum\Amqp;
+use Riven\Amqp\Exception\MessageException;
+use Riven\Amqp\Invoke\CalleeEvent;
+use Riven\Amqp\Packer\PhpSerializerPacker;
+use Riven\Amqp\Result;
 use Throwable;
 
 /**
@@ -23,49 +23,86 @@ use Throwable;
  */
 abstract class ProducerMessage extends Message implements ProducerMessageInterface
 {
-    // 消息负载
+    /**
+     * 消息负载
+     * @var mixed|string
+     */
     protected mixed $payload = '';
 
-    // 路由键，支持字符串或数组
+    /**
+     * 路由键，支持字符串或数组
+     * @var array|string
+     */
     protected array|string $routingKey = '';
 
-    // 消息属性，默认持久化消息
+    /**
+     * 消息属性，默认持久化消息
+     * @var array
+     */
     protected array $properties = [
         'content_type' => 'text/plain',
-        'delivery_mode' => Amqp::DELIVERY_MODE_PERSISTENT, // 持久化消息
+        'delivery_mode' => Amqp::DELIVERY_MODE_PERSISTENT->value, // 持久化消息
         'message_id' => '' // 消息ID
     ];
 
-    // 是否开启强制投递（mandatory），没路由的消息会返回给生产者
+    /**
+     * 是否开启强制投递（mandatory），没路由的消息会返回给生产者
+     * @var bool
+     */
     protected bool $mandatory = false;
-    // 是否开启即时投递（immediate），消息无法立即投递给消费者时会返回给生产者（已废弃，不推荐使用）
+
+    /**
+     * 是否开启即时投递（immediate），消息无法立即投递给消费者时会返回给生产者（已废弃，不推荐使用）
+     * @var bool
+     */
     protected bool $immediate = false;
 
+    /**
+     * @return bool
+     */
     public function getMandatory(): bool
     {
         return $this->mandatory;
     }
 
+    /**
+     * @return bool
+     */
     public function getImmediate(): bool
     {
         return $this->immediate;
     }
 
+    /**
+     * @param bool $immediate
+     * @return void
+     */
     public function setImmediate(bool $immediate): void
     {
         $this->immediate = $immediate;
     }
 
+    /**
+     * @param array $properties
+     * @return void
+     */
     public function setProperties(array $properties): void
     {
         $this->properties = array_merge($this->getProperties(), $properties);
     }
 
+    /**
+     * @return array
+     */
     public function getProperties(): array
     {
         return $this->properties;
     }
 
+    /**
+     * @param $data
+     * @return $this
+     */
     public function setPayload($data): self
     {
         $this->payload = $data;
@@ -90,13 +127,45 @@ abstract class ProducerMessage extends Message implements ProducerMessageInterfa
     }
 
     /**
-     * 当 Mandatory 消息未被路由并被 Broker 返回时触发。
-     * 子类可重写此方法以自定义处理逻辑。
+     * 当消息被 Broker 确认时调用「子类可重写此方法以自定义处理逻辑」
+     * @param AMQPMessage $message
+     * @return void
      */
-    public function onMandatoryReturn(int $replyCode, string $replyText, string $exchange, string $routingKey, AMQPMessage $message): void
+    public function ackHandler(AMQPMessage $message): void
     {
-        // 默认行为：记录警告日志
-        Log::warning('Mandatory message was returned by broker', [
+        Log::debug("[Ack received for delivery]", [
+            'exchange' => $message->getExchange(),
+            'delivery_tag' => $message->getDeliveryTag(),
+            'body' => $message->getBody(),
+        ]);
+    }
+
+    /**
+     * 当消息被 Broker 拒绝时调用「子类可重写此方法以自定义处理逻辑」
+     * @param AMQPMessage $message
+     * @return void
+     */
+    public function nackHandler(AMQPMessage $message): void
+    {
+        Log::error("[Nack received for delivery]", [
+            'exchange' => $message->getExchange(),
+            'delivery_tag' => $message->getDeliveryTag(),
+            'body' => $message->getBody(),
+        ]);
+    }
+
+    /**
+     * 当 Mandatory 消息未被路由并被 Broker 返回时触发「子类可重写此方法以自定义处理逻辑」
+     * @param int $replyCode
+     * @param string $replyText
+     * @param string $exchange
+     * @param string $routingKey
+     * @param AMQPMessage $message
+     * @return void
+     */
+    public function basicReturnCallback(int $replyCode, string $replyText, string $exchange, string $routingKey, AMQPMessage $message): void
+    {
+        Log::error('[Mandatory message was returned by broker]', [
             'replyCode' => $replyCode,
             'replyText' => $replyText,
             'exchange' => $exchange,

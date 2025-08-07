@@ -7,34 +7,72 @@ namespace Riven\Amqp\Message;
 
 use Riven\Amqp\Builder\ExchangeBuilder;
 
+/**
+ * 消息接口
+ */
 interface MessageInterface
 {
     /**
-     * Pool name for amqp.
+     * 获取连接池名称
+     * @return string
      */
     public function getPoolName(): string;
 
-    public function setType(string $type);
+    /**
+     * 设置消息类型
+     * @param string $type
+     * @return mixed
+     */
+    public function setType(string $type): mixed;
 
+    /**
+     * 获取消息类型
+     * @return string
+     */
     public function getType(): string;
 
-    public function setExchange(string $exchange);
+    /**
+     * 设置交换机名称
+     * @param string $exchange
+     * @return mixed
+     */
+    public function setExchange(string $exchange): mixed;
 
+    /**
+     * 获取交换机名称
+     * @return string
+     */
     public function getExchange(): string;
 
-    public function setRoutingKey($routingKey);
+    /**
+     * 设置路由键
+     * @param $routingKey
+     * @return mixed
+     */
+    public function setRoutingKey($routingKey): mixed;
 
+    /**
+     * 获取路由键
+     * @return array|string
+     */
     public function getRoutingKey(): array|string;
 
+    /**
+     * 获取交换机构建器
+     * @return ExchangeBuilder
+     */
     public function getExchangeBuilder(): ExchangeBuilder;
 
     /**
-     * Serialize the message body to a string.
+     * 序列化消息
+     * @return string
      */
     public function serialize(): string;
 
     /**
-     * Unserialize the message body.
+     * 反序列化消息
+     * @param string $data
+     * @return mixed
      */
-    public function unserialize(string $data);
+    public function unserialize(string $data): mixed;
 }

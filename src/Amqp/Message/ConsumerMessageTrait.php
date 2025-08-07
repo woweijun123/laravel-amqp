@@ -2,11 +2,12 @@
 
 namespace Riven\Amqp\Message;
 
-use Riven\Amqp\Result;
-use Riven\Amqp\Invoke\CalleeEvent;
-use Riven\Amqp\Invoke\Reflection;
 use Exception;
 use PhpAmqpLib\Message\AMQPMessage;
+use Riven\Amqp\Invoke\CalleeEvent;
+use Riven\Amqp\Invoke\Exception\InvokeException;
+use Riven\Amqp\Invoke\Reflection;
+use Riven\Amqp\Result;
 
 trait ConsumerMessageTrait
 {
@@ -36,7 +37,7 @@ trait ConsumerMessageTrait
      */
     public function handle(mixed $data, AMQPMessage $message): bool
     {
-        throw new Exception('未重写 handle 方法');
+        throw new InvokeException('未重写 handle 方法');
     }
 
     /**

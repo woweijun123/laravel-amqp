@@ -2,7 +2,6 @@
 
 namespace Riven\Amqp;
 
-use App\Enums\RedisKey;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Riven\Amqp\Enum\AmqpRedisKey;

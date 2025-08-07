@@ -15,7 +15,8 @@ use PhpAmqpLib\Wire\AMQPTable;
 trait ProducerDelayedMessageTrait
 {
     /**
-     * Overwrite.
+     * 获取延迟交换机构建器。
+     * @return ExchangeBuilder
      */
     public function getExchangeBuilder(): ExchangeBuilder
     {

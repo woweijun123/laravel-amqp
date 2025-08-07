@@ -106,18 +106,6 @@ interface ConsumerMessageInterface extends MessageInterface
     public function isNowait(): bool;
 
     /**
-     * read_write_timeout: 读写超时
-     * @return int|null
-     */
-    public function readWriteTimeout(): int|null;
-
-    /**
-     * heartbeat: 心跳间隔
-     * @return int|null
-     */
-    public function heartbeat(): int|null;
-
-    /**
      * arguments: 额外的参数
      * @return array
      */
@@ -130,28 +118,6 @@ interface ConsumerMessageInterface extends MessageInterface
     public function getTicket(): ?int;
 
     /**
-     * 判断消费者是否启用。
-     *
-     * @return bool
-     */
-    public function isEnable(): bool;
-
-    /**
-     * 设置消费者启用状态。
-     *
-     * @param bool $enable 启用状态
-     * @return static
-     */
-    public function setEnable(bool $enable): static;
-
-    /**
-     * 获取消费者最大消费消息数量。
-     *
-     * @return int
-     */
-    public function getMaxConsumption(): int;
-
-    /**
      * 设置消费者最大消费消息数量。
      *
      * @param int $maxConsumption 最大消费数量
@@ -160,11 +126,11 @@ interface ConsumerMessageInterface extends MessageInterface
     public function setMaxConsumption(int $maxConsumption): static;
 
     /**
-     * 获取等待消息的超时时间。
+     * 获取消费者最大消费消息数量。
      *
-     * @return int|float 超时时间（秒）
+     * @return int
      */
-    public function getWaitTimeout(): int|float;
+    public function getMaxConsumption(): int;
 
     /**
      * 设置等待消息的超时时间。
@@ -175,19 +141,11 @@ interface ConsumerMessageInterface extends MessageInterface
     public function setWaitTimeout(int|float $timeout): static;
 
     /**
-     * 设置消费者实例数量或批量处理数量。
+     * 获取等待消息的超时时间。
      *
-     * @param int $nums 数量
-     * @return static
+     * @return int|float 超时时间（秒）
      */
-    public function setNums(int $nums): static;
-
-    /**
-     * 获取消费者实例数量或批量处理数量。
-     *
-     * @return int
-     */
-    public function getNums(): int;
+    public function getWaitTimeout(): int|float;
 
     /**
      * 设置 PSR 容器实例，用于依赖注入。

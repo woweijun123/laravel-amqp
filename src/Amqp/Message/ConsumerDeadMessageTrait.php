@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Riven\Amqp\Message;
 
-use App\Enums\Amqp\AmqpAttr;
 use Riven\Amqp\Builder\QueueBuilder;
 use PhpAmqpLib\Wire\AMQPTable;
 
@@ -35,7 +34,7 @@ trait ConsumerDeadMessageTrait
      */
     protected function getDeadLetterExchange(): string
     {
-        return AmqpAttr::DLQExchange->value;
+        return 'dlq_exchange';
     }
 
     /**
@@ -44,6 +43,6 @@ trait ConsumerDeadMessageTrait
      */
     protected function getDeadLetterRoutingKey(): string
     {
-        return AmqpAttr::DLQRoutingKey->value;
+        return 'dlq_routingkey';
     }
 }

@@ -12,7 +12,7 @@ class PhpSerializerPacker implements PackerInterface
         return json_encode($data, JSON_UNESCAPED_UNICODE);
     }
 
-    public function unpack(string $data)
+    public function unpack(string $data): mixed
     {
         return json_decode($data, true);
     }

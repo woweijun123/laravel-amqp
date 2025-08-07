@@ -45,55 +45,55 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
      * 获取消费者标签「Consumer Tag」, 在 AMQP 中用于唯一标识一个消费者
      * @var null|string
      */
-    protected $consumerTag = null;
+    protected ?string $consumerTag = null;
 
     /**
      * 是否接收发布者自己发布的消息
      * @var bool
      */
-    protected $noLocal = false;
+    protected bool $noLocal = false;
 
     /**
      * 手动消息确认（false 表示需要手动 ack/nack）
      * @var bool
      */
-    protected $noAck = false;
+    protected bool $noAck = false;
 
     /**
      * 队列独占（false 表示队列可以被多个消费者同时访问）
      * @var bool
      */
-    protected $exclusive = false;
+    protected bool $exclusive = false;
 
     /**
-     * 队列独占（false 表示队列可以被多个消费者同时访问）
+     * 不等待服务器响应（true 表示不等待服务器响应）
      * @var bool
      */
-    protected $nowait = false;
+    protected bool $nowait = false;
 
     /**
      * 队列参数
      * @var array
      */
-    protected $arguments = [];
+    protected array $arguments = [];
 
     /**
-     * 队列票据
-     * @var null
+     * 队列的访问权限凭证
+     * @var int|null
      */
-    protected $ticket = null;
+    protected ?int $ticket = null;
 
     /**
      * 读写超时
-     * @var null
+     * @var int|null
      */
-    protected $readWriteTimeout = null;
+    protected ?int $readWriteTimeout = null;
 
     /**
      * 心跳间隔
-     * @var null
+     * @var int|null
      */
-    protected $heartbeat = null;
+    protected ?int $heartbeat = null;
 
     /**
      * 消息处理失败时重试次数
@@ -240,9 +240,8 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
      * @param string $data 待反序列化的字符串数据
      * @return mixed 反序列化后的数据
      */
-    public function unserialize(string $data)
+    public function unserialize(string $data): mixed
     {
-        // 假设 `app()` 是一个获取容器实例或解析依赖的辅助函数
         return app(PhpSerializerPacker::class)->unpack($data);
     }
 
@@ -293,24 +292,6 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
     }
 
     /**
-     * read_write_timeout: 读写超时
-     * @return int|null
-     */
-    public function readWriteTimeout(): int|null
-    {
-        return $this->readWriteTimeout;
-    }
-
-    /**
-     * heartbeat: 心跳间隔
-     * @return int|null
-     */
-    public function heartbeat(): int|null
-    {
-        return $this->heartbeat;
-    }
-
-    /**
      * arguments: 额外的参数
      * @return array
      */
@@ -326,27 +307,6 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
     public function getTicket(): ?int
     {
         return $this->ticket;
-    }
-
-    /**
-     * 检查消费者是否启用
-     * @return bool
-     */
-    public function isEnable(): bool
-    {
-        return $this->enable;
-    }
-
-    /**
-     * 设置消费者启用状态
-     * @param bool $enable
-     * @return static
-     */
-    public function setEnable(bool $enable): static
-    {
-        $this->enable = $enable;
-
-        return $this;
     }
 
     /**
@@ -387,27 +347,6 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
     public function setWaitTimeout(int|float $timeout): static
     {
         $this->waitTimeout = $timeout;
-
-        return $this;
-    }
-
-    /**
-     * 获取消费者实例数量或批量处理数量
-     * @return int
-     */
-    public function getNums(): int
-    {
-        return $this->nums;
-    }
-
-    /**
-     * 设置消费者实例数量或批量处理数量
-     * @param int $nums
-     * @return static
-     */
-    public function setNums(int $nums): static
-    {
-        $this->nums = $nums;
 
         return $this;
     }
