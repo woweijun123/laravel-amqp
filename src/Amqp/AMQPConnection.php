@@ -59,7 +59,7 @@ class AMQPConnection extends AMQPStreamConnection
      */
     public static function getInstance(bool $isConsumer = false): AMQPConnection
     {
-        if (!self::$instance || !self::$instance->isConnected()) {
+        if (!isset(self::$instance) || !self::$instance->isConnected()) {
             self::$instance = new self($isConsumer);
         }
         return self::$instance;
@@ -71,7 +71,7 @@ class AMQPConnection extends AMQPStreamConnection
      */
     public function getChannel(): AMQPChannel
     {
-        if (!self::$channel || !self::$channel->is_open()) {
+        if (!isset(self::$channel) || !self::$channel->is_open()) {
             self::$channel = $this->channel();
         }
         return self::$channel;
@@ -83,7 +83,7 @@ class AMQPConnection extends AMQPStreamConnection
      */
     public function getConfirmChannel(): AMQPChannel
     {
-        if (!self::$confirmChannel || !self::$confirmChannel->is_open()) {
+        if (!isset(self::$confirmChannel) || !self::$confirmChannel->is_open()) {
             self::$confirmChannel = $this->channel();
             self::$confirmChannel->confirm_select();
         }
@@ -111,21 +111,21 @@ class AMQPConnection extends AMQPStreamConnection
      */
     public static function shutdown(): void
     {
-        if (self::$channel && self::$channel->is_open()) {
+        if (isset(self::$channel) && self::$channel->is_open()) {
             try {
                 self::$channel->close();
             } catch (Throwable $e) {
                 Log::error("关闭 AMQP channel 失败", ['exception' => $e]);
             }
         }
-        if (self::$confirmChannel && self::$confirmChannel->is_open()) {
+        if (isset(self::$confirmChannel) && self::$confirmChannel->is_open()) {
             try {
                 self::$confirmChannel->close();
             } catch (Throwable $e) {
                 Log::error("关闭 AMQP confirmChannel 失败", ['exception' => $e]);
             }
         }
-        if (self::$instance && self::$instance->isConnected()) {
+        if (isset(self::$instance) && self::$instance->isConnected()) {
             try {
                 self::$instance->close();
             } catch (Throwable $e) {
