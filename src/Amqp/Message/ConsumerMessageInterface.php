@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Riven\Amqp\Message;
 
+use PhpAmqpLib\Message\AMQPMessage;
 use Riven\Amqp\Builder\QueueBuilder;
 use Riven\Amqp\Result;
-use PhpAmqpLib\Message\AMQPMessage;
-use Psr\Container\ContainerInterface;
 
 /**
  * 消费者消息接口
@@ -146,19 +145,4 @@ interface ConsumerMessageInterface extends MessageInterface
      * @return int|float 超时时间（秒）
      */
     public function getWaitTimeout(): int|float;
-
-    /**
-     * 设置 PSR 容器实例，用于依赖注入。
-     *
-     * @param ContainerInterface $container 容器实例
-     * @return static
-     */
-    public function setContainer(ContainerInterface $container): static;
-
-    /**
-     * 获取 PSR 容器实例。
-     *
-     * @return ContainerInterface|null 容器实例
-     */
-    public function getContainer(): ?ContainerInterface;
 }

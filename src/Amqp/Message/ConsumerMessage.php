@@ -8,7 +8,6 @@ use Riven\Amqp\Builder\QueueBuilder;
 use Riven\Amqp\Packer\PhpSerializerPacker;
 use Riven\Amqp\Result;
 use PhpAmqpLib\Message\AMQPMessage;
-use Psr\Container\ContainerInterface;
 
 /**
  * 抽象消费者消息类
@@ -17,12 +16,6 @@ use Psr\Container\ContainerInterface;
  */
 abstract class ConsumerMessage extends Message implements ConsumerMessageInterface
 {
-    /**
-     * PSR 容器实例，用于依赖注入或获取服务
-     * @var ContainerInterface|null
-     */
-    public ?ContainerInterface $container = null;
-
     /**
      * 队列名称
      * @var string|null
@@ -349,26 +342,5 @@ abstract class ConsumerMessage extends Message implements ConsumerMessageInterfa
         $this->waitTimeout = $timeout;
 
         return $this;
-    }
-
-    /**
-     * 设置 PSR 容器实例
-     * @param ContainerInterface $container
-     * @return static
-     */
-    public function setContainer(ContainerInterface $container): static
-    {
-        $this->container = $container;
-
-        return $this;
-    }
-
-    /**
-     * 获取 PSR 容器实例
-     * @return ContainerInterface|null
-     */
-    public function getContainer(): ?ContainerInterface
-    {
-        return $this->container;
     }
 }
