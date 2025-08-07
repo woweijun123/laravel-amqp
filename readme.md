@@ -162,6 +162,8 @@ php artisan amqp:init
 CommonProducer::send(['order_id' => 123]);
 // 发布延迟消息「单位：秒」
 CommonProducer::send(['order_id' => 123], delayTime: 2);
+// 发布普通消息并开启发布确认
+CommonProducer::send(['order_id' => 123], confirm: true);
 ```
 
 ### 步骤4：启动消费者进程消费
