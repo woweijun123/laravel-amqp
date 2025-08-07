@@ -97,12 +97,15 @@ class AMQPConnection extends AMQPStreamConnection
      */
     public function heartbeat(): void
     {
-        pcntl_async_signals(true);
-        pcntl_signal(SIGALRM, function () {
-            $this->checkHeartBeat(); // 手动触发心跳响应
-            pcntl_alarm($this->heartbeat);
-        });
-        pcntl_alarm($this->heartbeat);
+        if (isset($this->heartbeat) && $this->heartbeat > 0) {
+            $heartbeat = ceil($this->heartbeat / 2);
+            pcntl_async_signals(true);
+            pcntl_signal(SIGALRM, function () use ($heartbeat) {
+                $this->checkHeartBeat(); // 手动触发心跳响应
+                pcntl_alarm($heartbeat);
+            });
+            pcntl_alarm($heartbeat);
+        }
     }
 
     /**
