@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Riven\Amqp\Message;
 
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -178,8 +179,7 @@ abstract class ProducerMessage extends Message implements ProducerMessageInterfa
     }
 
     /**
-     * 发送消息到 AMQP 队列。
-     *
+     * 发送消息门面方法
      * @param array $data 消息体数据。
      * @param int $delayTime 延迟时间（秒），0表示不延迟。
      * @param bool $confirm 是否需要Broker确认消息已接收。
@@ -189,6 +189,39 @@ abstract class ProducerMessage extends Message implements ProducerMessageInterfa
      * @return bool 消息发送是否成功。
      */
     public static function send(
+        array              $data,
+        int                $delayTime = 0,
+        bool               $confirm = false,
+        string             $msgId = '',
+        int                $timeout = 5,
+        string|CalleeEvent $routingKey = ''
+    ): bool
+    {
+        $args = func_get_args();
+        /* @var ProducerMessage $producerMessage */
+        $producerMessage = app(static::class);
+        /* @var AmqpManager $amqpManager 通过 AmqpManager 发送消息 */
+        $amqpManager = app(AmqpManager::class);
+        // 若实现了 ShouldDispatchAfterCommit 接口，则使用事务管理器添加回调, 这样可以确保MQ在数据库事务提交后才发送
+        if ($producerMessage instanceof ShouldDispatchAfterCommit && $transactions = $amqpManager->resolveTransactionManager()) {
+            $transactions->addCallback(fn () => self::invokeSend(...$args));
+            return true;
+        }
+        // 否则直接执行闭包
+        return self::invokeSend(...$args);
+    }
+
+    /**
+     * 实际发送消息
+     * @param array $data 消息体数据。
+     * @param int $delayTime 延迟时间（秒），0表示不延迟。
+     * @param bool $confirm 是否需要Broker确认消息已接收。
+     * @param string $msgId 消息唯一ID，为空则自动生成。
+     * @param int $timeout 确认超时时间（秒）。
+     * @param string|CalleeEvent $routingKey 消息路由键，为空则使用类默认值。
+     * @return bool 消息发送是否成功。
+     */
+    public static function invokeSend(
         array              $data,
         int                $delayTime = 0,
         bool               $confirm = false,

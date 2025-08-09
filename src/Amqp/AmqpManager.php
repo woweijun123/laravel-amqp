@@ -10,6 +10,7 @@ use PhpAmqpLib\Message\AMQPMessage;
 use Riven\Amqp\Builder\ExchangeBuilder;
 use Riven\Amqp\Builder\QueueBuilder;
 use Riven\Amqp\Enum\AmqpRedisKey;
+use Riven\Amqp\Invoke\TransactionManagerResolver;
 use Riven\Amqp\Message\ConsumerMessageInterface;
 use Riven\Amqp\Message\MessageInterface;
 use Riven\Amqp\Message\ProducerMessageInterface;
@@ -18,6 +19,8 @@ use Throwable;
 
 class AmqpManager
 {
+    use TransactionManagerResolver;
+
     private int $cacheTime = 3600; // 缓存时间「秒」
     private array $declaredExchanges = []; // 交换机缓存
     private array $declaredQueues = []; // 队列缓存

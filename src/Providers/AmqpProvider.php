@@ -100,7 +100,9 @@ class AmqpProvider extends ServiceProvider
         }
         register_shutdown_function([$amqpManager, 'shutdown']);
         $this->app->singletonIf(AmqpManager::class, function () use ($amqpManager) {
-            return $amqpManager;
+            return $amqpManager->setTransactionManagerResolver(function () {
+                return $this->app->bound('db.transactions') ? $this->app->make('db.transactions') : null;
+            });
         });
     }
 
