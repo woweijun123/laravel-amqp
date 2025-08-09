@@ -4,8 +4,6 @@ namespace Riven\Providers;
 
 use Exception;
 use FilesystemIterator;
-use Illuminate\Contracts\Cache\Repository;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
@@ -18,7 +16,6 @@ use Riven\Amqp\Annotation\Impl;
 use Riven\Amqp\Annotation\Producer;
 use Riven\Amqp\Commands\ConsumeCommand;
 use Riven\Amqp\Commands\InitCommand;
-use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Exception\MessageException;
 use Riven\Amqp\Invoke\CalleeCollector;
 use Riven\Amqp\Invoke\Reflection;
@@ -26,8 +23,6 @@ use Throwable;
 
 class AmqpProvider extends ServiceProvider
 {
-    private int $cacheTime = 86400; // 缓存时间「秒」
-
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/amqp.php', 'amqp');
@@ -58,8 +53,8 @@ class AmqpProvider extends ServiceProvider
      */
     protected function registerImplClasses(): void
     {
-        // 从缓存或通过扫描发现 Impl 绑定
-        $bindings = $this->getBindings(self::getType(AmqpRedisKey::Impl), [$this, 'discoverImplBindings']);
+        // 扫描发现 Impl 绑定
+        $bindings = $this->discoverImplBindings();
         foreach ($bindings as $interface => $class) {
             // 将接口与其实现类绑定为单例，如果尚未绑定的话
             $this->app->singletonIf($interface, $class);
@@ -74,9 +69,9 @@ class AmqpProvider extends ServiceProvider
      */
     protected function registerCalleeMethods(): void
     {
-        // 从缓存或通过扫描发现 Callee 方法
-        $calleeMethods = $this->getBindings(self::getType(AmqpRedisKey::Callee), [$this, 'discoverCalleeMethods']);
-        foreach ($calleeMethods as $callable) {
+        // 扫描发现 Callee 方法
+        $bindings = $this->discoverCalleeMethods();
+        foreach ($bindings as $callable) {
             [$callable, $event, $scope] = $callable;
             // 将发现的回调方法添加到回调收集器中
             CalleeCollector::addCallee($callable, is_string($event) ? unserialize($event) : $event, $scope);
@@ -92,7 +87,7 @@ class AmqpProvider extends ServiceProvider
     protected function registerAmqp(): void
     {
         // 从缓存或通过扫描发现 AMQP 绑定
-        $bindings = $this->getBindings(self::getType(AmqpRedisKey::Amqp), [$this, 'discoverAmqp']);
+        $bindings = $this->discoverAmqp();
         $amqpManager = new AmqpManager($bindings['producers'] ?? [], $bindings['consumers'] ?? []);
         // 注册 Artisan 命令
         if ($this->app->runningInConsole()) {
@@ -220,59 +215,6 @@ class AmqpProvider extends ServiceProvider
     }
 
     /**
-     * 获取绑定配置，优先从缓存读取，如果缓存不存在或环境非 'local' 则通过回调函数发现，
-     * 并将结果存入缓存。
-     * @param string $type 绑定类型（如 'impl', 'callee', 'amqp'）
-     * @param callable $discoverCallback 发现绑定的回调函数
-     * @return array
-     */
-    private function getBindings(string $type, callable $discoverCallback): array
-    {
-        // 如果不是本地环境，尝试从缓存读取
-         if (!app()->environment('local')) {
-             try {
-                 /** @var Repository $cache */
-                 $cached = $this->getCache()->get($type);
-                 // 如果缓存中存在且是数组，则直接返回
-                 if (is_array($cached) && !empty($cached)) {
-                     return $cached;
-                 }
-             } catch (Throwable $e) {
-                 // 缓存读取失败，记录警告并降级为本地扫描
-                 Log::warning("缓存读取失败，降级为本地扫描: key=$type", ['exception' => $e]);
-             }
-         }
-        // 如果缓存不存在或读取失败，则通过回调函数发现绑定
-        $bindings = $discoverCallback();
-
-        // 将发现的绑定结果存入缓存
-        $this->getCache()->put($type, $bindings, $this->cacheTime);
-        return $bindings;
-    }
-
-    /**
-     * 获取缓存仓库实例，优先使用 Redis，如果 Redis 不可用则降级到文件缓存。
-     * @return Repository
-     */
-    private function getCache(): Repository
-    {
-        try {
-            // 尝试使用 Redis 缓存
-            return Cache::store('redis');
-        } catch (Exception $e) {
-            // Redis 缓存不可用，记录警告并尝试使用文件缓存
-            Log::warning('Redis 缓存不可用，已降级为文件缓存', ['exception' => $e]);
-            try {
-                // 尝试使用文件缓存
-                return Cache::store('file');
-            } catch (Exception $eFile) {
-                // 文件缓存也不可用，记录错误并抛出异常
-                Log::error('文件缓存也不可用，请检查配置', ['exception' => $eFile]);
-            }
-        }
-    }
-
-    /**
      * 扫描指定目录数组下的所有PHP文件。
      * 使用静态变量缓存已扫描的文件列表以提高性能。
      * @param array $dirs 要扫描的目录路径数组
@@ -351,15 +293,5 @@ class AmqpProvider extends ServiceProvider
 
         // 拼接成完整的命名空间类名（假设 app 目录对应 App 命名空间）
         return "App\\$className";
-    }
-
-    /**
-     * 获取缓存键
-     * @param AmqpRedisKey $key
-     * @return string
-     */
-    protected static function getType(AmqpRedisKey $key): string
-    {
-        return $key->spr(env('APP_NAME', 'laravel-amqp'));
     }
 }
