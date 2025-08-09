@@ -1,16 +1,10 @@
------
-
 # riven/laravel-amqp
 
-[](https://www.google.com/search?q=//packagist.org/packages/riven/laravel-amqp)
-[](https://www.google.com/search?q=//packagist.org/packages/riven/laravel-amqp)
 [](https://www.google.com/search?q=//packagist.org/packages/riven/laravel-amqp)
 
 `php-amqplib` 的 Laravel 友好型封装，为 Laravel 生态系统提供 AMQP 消息队列支持。
 
-  - [Laravel](https://github.com/laravel/laravel)
-  - [Lumen](https://github.com/laravel/lumen)
-  - [Laravel Zero](https://github.com/laravel-zero/laravel-zero)
+- [Laravel](https://github.com/laravel/laravel)
 
 -----
 
@@ -173,4 +167,15 @@ php artisan amqp:consume xxx 「xxx填写为具体对应的队列名称」
 
 # 实例
 php artisan amqp:consume common_queue
+```
+### 补充
+#### 数据库事务完成后发送MQ消息
+有时，需要只在活跃的数据库事务完成后再发送MQ消息。为此，在生产者类中需要实现 ShouldDispatchAfterCommit 接口。
+
+这个接口指示 Laravel 在数据库事务完成前不要发送MQ消息。
+- 如果数据库事务执行失败，不会发送MQ消息
+- 如果调度的时候没有数据库事务在执行中，则会立马发送MQ消息
+```php
+#[Producer]
+class CommonProducer extends ProducerMessage implements ShouldDispatchAfterCommit
 ```
