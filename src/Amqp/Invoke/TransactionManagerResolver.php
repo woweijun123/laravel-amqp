@@ -19,7 +19,7 @@ trait TransactionManagerResolver
      * 解析数据库事务管理器
      * @return DatabaseTransactionsManager|null
      */
-    protected function resolveTransactionManager(): ?DatabaseTransactionsManager
+    public function resolveTransactionManager(): ?DatabaseTransactionsManager
     {
         return call_user_func($this->transactionManagerResolver);
     }
