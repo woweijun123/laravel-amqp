@@ -317,7 +317,7 @@ class AmqpProvider extends ServiceProvider
      * @param string $key
      * @return string
      */
-    protected static function getCachedPath(string $key): string
+    public static function getCachedPath(string $key): string
     {
         return base_path() . '/bootstrap/' . $key;
     }
