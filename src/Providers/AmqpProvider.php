@@ -26,8 +26,6 @@ use Throwable;
 
 class AmqpProvider extends ServiceProvider
 {
-    private int $cacheTime = 86400; // 缓存时间「秒」
-
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/amqp.php', 'amqp');
@@ -246,29 +244,25 @@ class AmqpProvider extends ServiceProvider
         $bindings = $discoverCallback();
 
         // 将发现的绑定结果存入缓存
-        $this->getCache()->put($type, $bindings, $this->cacheTime);
+        $this->getCache()->put($type, $bindings, 86400);
         return $bindings;
     }
 
     /**
-     * 获取缓存仓库实例，优先使用 Redis，如果 Redis 不可用则降级到文件缓存。
+     * 获取缓存仓库实例
      * @return Repository
      */
     private function getCache(): Repository
     {
         try {
-            // 尝试使用 Redis 缓存
-            return Cache::store('redis');
-        } catch (Exception $e) {
-            // Redis 缓存不可用，记录警告并尝试使用文件缓存
-            Log::warning('Redis 缓存不可用，已降级为文件缓存', ['exception' => $e]);
             try {
-                // 尝试使用文件缓存
                 return Cache::store('file');
             } catch (Exception $eFile) {
-                // 文件缓存也不可用，记录错误并抛出异常
                 Log::error('文件缓存也不可用，请检查配置', ['exception' => $eFile]);
             }
+        } catch (Exception $e) {
+            Log::warning('Redis 缓存不可用，已降级为文件缓存', ['exception' => $e]);
+            return Cache::store('redis');
         }
     }
 
