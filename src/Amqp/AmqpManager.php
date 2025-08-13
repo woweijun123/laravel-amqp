@@ -3,13 +3,9 @@
 namespace Riven\Amqp;
 
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Redis;
 use InvalidArgumentException;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Message\AMQPMessage;
-use Riven\Amqp\Builder\ExchangeBuilder;
-use Riven\Amqp\Builder\QueueBuilder;
-use Riven\Amqp\Enum\AmqpRedisKey;
 use Riven\Amqp\Invoke\TransactionManagerResolver;
 use Riven\Amqp\Message\ConsumerMessageInterface;
 use Riven\Amqp\Message\MessageInterface;
@@ -20,10 +16,6 @@ use Throwable;
 class AmqpManager
 {
     use TransactionManagerResolver;
-
-    private int $cacheTime = 3600; // 缓存时间「秒」
-    private array $declaredExchanges = []; // 交换机缓存
-    private array $declaredQueues = []; // 队列缓存
     private bool $init = false; // 是否初始化
 
     /**
@@ -73,22 +65,6 @@ class AmqpManager
     }
 
     /**
-     * 判断交换机是否存在
-     */
-    public function exchangeExists(ExchangeBuilder $builder): bool
-    {
-        // 本地缓存
-        if (!empty($this->declaredExchanges[$builder->getExchange()])) {
-            return $this->declaredExchanges[$builder->getExchange()];
-        }
-        // Redis 缓存
-        if ($this->getExchangeCache($builder->getExchange())) {
-            return $this->declaredExchanges[$builder->getExchange()] = true;
-        }
-        return false;
-    }
-
-    /**
      * 声明交换机
      * @param MessageInterface $message
      * @param AMQPChannel $channel
@@ -98,9 +74,6 @@ class AmqpManager
     protected function declareExchange(MessageInterface $message, AMQPChannel $channel): bool
     {
         $builder = $message->getExchangeBuilder();
-        if ($this->exchangeExists($builder)) {
-            return true;
-        }
         try {
             Log::debug("交换机 [{$builder->getExchange()}] 不存在 申明中...");
             $channel->exchange_declare(
@@ -114,31 +87,11 @@ class AmqpManager
                 $builder->getArguments(),   // 其他可选参数
                 $builder->getTicket()       // 队列的访问权限凭证
             );
-            $this->setExchangeCache($builder->getExchange());
-            $this->declaredExchanges[$builder->getExchange()] = true;
             return true;
         } catch (Throwable $exception) {
             Log::error("[{$message->getExchange()}] 交换机申明失败" . $exception->getMessage());
-            $this->setExchangeCache($builder->getExchange(), 0);
-            $this->declaredExchanges[$builder->getExchange()] = false;
             throw $exception;
         }
-    }
-
-    /**
-     * 判断队列是否存在
-     */
-    public function queueExists(QueueBuilder $builder): bool
-    {
-        // 本地缓存
-        if (!empty($this->declaredQueues[$builder->getQueue()])) {
-            return $this->declaredQueues[$builder->getQueue()];
-        }
-        // Redis 缓存
-        if ($this->getQueueCache($builder->getQueue())) {
-            return $this->declaredQueues[$builder->getQueue()] = true;
-        }
-        return false;
     }
 
     /**
@@ -152,9 +105,6 @@ class AmqpManager
     protected function declareQueue(ConsumerMessageInterface $message, AMQPChannel $channel): bool
     {
         $builder = $message->getQueueBuilder();
-        if ($this->queueExists($builder)) {
-            return true;
-        }
         try {
             Log::debug("队列 [{$builder->getQueue()}] 不存在 申明中...");
             $channel->queue_declare(
@@ -167,9 +117,6 @@ class AmqpManager
                 $builder->getArguments(), // 其他可选参数（如 TTL, DLX 等）
                 $builder->getTicket() // 访问权限票据
             );
-            $this->setQueueCache($builder->getQueue());
-            $this->declaredQueues[$builder->getQueue()] = true;
-
             $routineKeys = (array)$message->getRoutingKey();
             foreach ($routineKeys as $routingKey) {
                 // 将队列绑定到交换机和路由键
@@ -183,8 +130,6 @@ class AmqpManager
             return true;
         } catch (Throwable $exception) {
             Log::error("[{$builder->getQueue()}] 队列申明失败" . $exception->getMessage());
-            $this->setQueueCache($builder->getQueue(), 0);
-            $this->declaredQueues[$builder->getQueue()] = false;
             throw $exception;
         }
     }
@@ -201,34 +146,28 @@ class AmqpManager
      */
     public function produce(ProducerMessageInterface $producerMessage, bool $confirm = false, int $timeout = 5): bool
     {
-        try {
-            $connection = AMQPConnection::getInstance();
-            $isSendSuccess = true; // 发送消息成功标志「不用发布确认，则假定发布成功」
-            // 启用发布确认
-            if ($confirm) {
-                $channel = $connection->getConfirmChannel();
-                $isSendSuccess = $this->confirmCallback($producerMessage, $channel);
-            } else {
-                $channel = $connection->getChannel();
-            }
-            // 创建 AMQPMessage 实例
-            $message = new AMQPMessage($producerMessage->payload(), $producerMessage->getProperties());
-            // 发布消息
-            $channel->basic_publish(
-                $message,
-                $producerMessage->getExchange(),    // 交换机名称
-                $producerMessage->getRoutingKey(),  // 路由键
-                $producerMessage->getMandatory(),   // 如果消息无法路由到队列，是否返回给生产者
-                $producerMessage->getImmediate()    // 消息是否必须立即被消费者接收
-            );
-            // 等待发布确认结果
-            if ($confirm) {
-                $channel->wait_for_pending_acks_returns($timeout); // 等待所有挂起的 ack/nack 确认或返回消息
-            }
-        } catch (Throwable $exception) {
-            // 缓存交换机和队列不存在
-            $this->switchExchangeQueueCache($exception);
-            throw $exception;
+        $connection = AMQPConnection::getInstance();
+        $isSendSuccess = true; // 发送消息成功标志「不用发布确认，则假定发布成功」
+        // 启用发布确认
+        if ($confirm) {
+            $channel = $connection->getConfirmChannel();
+            $isSendSuccess = $this->confirmCallback($producerMessage, $channel);
+        } else {
+            $channel = $connection->getChannel();
+        }
+        // 创建 AMQPMessage 实例
+        $message = new AMQPMessage($producerMessage->payload(), $producerMessage->getProperties());
+        // 发布消息
+        $channel->basic_publish(
+            $message,
+            $producerMessage->getExchange(),    // 交换机名称
+            $producerMessage->getRoutingKey(),  // 路由键
+            $producerMessage->getMandatory(),   // 如果消息无法路由到队列，是否返回给生产者
+            $producerMessage->getImmediate()    // 消息是否必须立即被消费者接收
+        );
+        // 等待发布确认结果
+        if ($confirm) {
+            $channel->wait_for_pending_acks_returns($timeout); // 等待所有挂起的 ack/nack 确认或返回消息
         }
 
         return $isSendSuccess;
@@ -286,7 +225,6 @@ class AmqpManager
                 }
             }
         } catch (Throwable $exception) {
-            $this->switchExchangeQueueCache($exception);
             Log::error("消费者异常退出进程($queueName)" . $exception->getMessage());
         }
         exit(1); // 异常退出进程, 退出码 1，可用于supervisor重启
@@ -383,73 +321,6 @@ class AmqpManager
     public function shutdown(): void
     {
         AMQPConnection::shutdown();
-    }
-
-    /**
-     * 缓存交换机和队列不存在
-     * @param Throwable $exception
-     * @return void
-     */
-    protected function switchExchangeQueueCache(Throwable $exception): void
-    {
-        // 根据异常信息判定指定交换机不存在，则标记redis中对应的交换机不存在
-        if (preg_match("/no exchange '([^']+?)'/", $exception->getMessage(), $matches)) {
-            $exchangeName = $matches[1];
-            if (key_exists($exchangeName, $this->producers)) {
-                $this->setQueueCache($exchangeName, 0);
-            }
-        }
-        // 根据异常信息判定指定队列不存在，则标记redis中对应的队列不存在
-        if (preg_match("/no queue '([^']+?)'/", $exception->getMessage(), $matches)) {
-            $queueName = $matches[1];
-            if (key_exists($queueName, $this->consumers)) {
-                $this->setQueueCache($queueName, 0);
-            }
-        }
-    }
-
-    /**
-     * 设置交换机缓存
-     * @param string $exchange
-     * @param int $flag 1:存在 0:不存在
-     * @return void
-     */
-    protected function setExchangeCache(string $exchange, int $flag = 1): void
-    {
-        Redis::hSet(AmqpRedisKey::AmqpDeclaredExchange->value, $exchange, $flag);
-        Redis::expire(AmqpRedisKey::AmqpDeclaredExchange->value, $this->cacheTime, 'NX');
-    }
-
-    /**
-     * 设置队列缓存
-     * @param string $queue
-     * @param int $flag 1:存在 0:不存在
-     * @return void
-     */
-    protected function setQueueCache(string $queue, int $flag = 1): void
-    {
-        Redis::hSet(AmqpRedisKey::AmqpDeclaredQueue->value, $queue, $flag);
-        Redis::expire(AmqpRedisKey::AmqpDeclaredQueue->value, $this->cacheTime, 'NX');
-    }
-
-    /**
-     * 获取交换机缓存
-     * @param string $exchange
-     * @return bool
-     */
-    protected function getExchangeCache(string $exchange): bool
-    {
-        return Redis::hGet(AmqpRedisKey::AmqpDeclaredExchange->value, $exchange);
-    }
-
-    /**
-     * 获取队列缓存
-     * @param string $queue
-     * @return bool
-     */
-    protected function getQueueCache(string $queue): bool
-    {
-        return (bool)Redis::hGet(AmqpRedisKey::AmqpDeclaredQueue->value, $queue);
     }
 
     /**
