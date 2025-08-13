@@ -102,7 +102,7 @@ class AmqpManager
             return true;
         }
         try {
-            Log::debug("交换机 [{$builder->getExchange()}] 不存在 申明中...");
+            Log::info("交换机 [{$builder->getExchange()}] 不存在 申明中...");
             $channel->exchange_declare(
                 $builder->getExchange(),    // 交换机名称
                 $builder->getType(),        // 交换机类型 (direct, fanout, topic, headers)
@@ -156,7 +156,7 @@ class AmqpManager
             return true;
         }
         try {
-            Log::debug("队列 [{$builder->getQueue()}] 不存在 申明中...");
+            Log::info("队列 [{$builder->getQueue()}] 不存在 申明中...");
             $channel->queue_declare(
                 $builder->getQueue(), // 队列名称
                 $builder->isPassive(), // 是否被动声明（只检查队列是否存在，不创建）
